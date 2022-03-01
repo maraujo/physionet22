@@ -1,0 +1,2 @@
+docker build -t image .
+docker run -v /physionet_data/challenge/example/model/:/physionet/model -v /physionet_data/challenge/example/test_data/:/physionet/test_data -v /physionet_data/challenge/example/test_outputs/:/physionet/test_outputs/ -v /physionet_data/challenge/example/training_data/:/physionet/training_data image bash ./test_in_docker.bash 

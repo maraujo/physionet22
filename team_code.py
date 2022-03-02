@@ -13,6 +13,8 @@ from helper_code import *
 import numpy as np, scipy as sp, scipy.stats, os, sys, joblib
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestClassifier
+import openl3
+import pandas as pd
 
 ################################################################################
 #
@@ -22,6 +24,9 @@ from sklearn.ensemble import RandomForestClassifier
 
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
+    SECONDS_PER_EMBEDDING = 2
+    main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
+    
     # Find data files.
     if verbose >= 1:
         print('Finding data files...')
@@ -53,19 +58,26 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
         # Load the current patient data and recordings.
         current_patient_data = load_patient_data(patient_files[i])
-        current_recordings = load_recordings(data_folder, current_patient_data)
-
-        # Extract features.
-        current_features = get_features(current_patient_data, current_recordings)
-        features.append(current_features)
+        num_locations = get_num_locations(current_patient_data)
+        recording_information = current_patient_data.split('\n')[1:num_locations+1]
+        recordings, frequencies = load_recordings(data_folder, current_patient_data, get_frequencies=True) 
+        record_files = []
+        for i in range(num_locations):
+            entries = recording_information[i].split(' ')
+            record_files.append(entries[2])
+        
+        #Get embedding for patient records
+        for wav_file in record_files:
+            filepath = os.path.join(data_folder, wav_file)
+            embs_part, tss_part = openl3.get_audio_embedding(recordings, frequencies, hop_size=SECONDS_PER_EMBEDDING, batch_size=4,   verbose=1 , model=main_model)
 
         # Extract labels and use one-hot encoding.
         current_labels = np.zeros(num_classes, dtype=int)
-        label = get_label(current_patient_data)
         if label in classes:
             j = classes.index(label)
             current_labels[j] = 1
-        labels.append(current_labels)
+        import ipdb;ipdb.set_trace()
+        pass
 
     features = np.vstack(features)
     labels = np.vstack(labels)

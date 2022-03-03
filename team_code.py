@@ -15,6 +15,8 @@ from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestClassifier
 import openl3
 import pandas as pd
+from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.model_selection import train_test_split
 
 ################################################################################
 #
@@ -22,15 +24,66 @@ import pandas as pd
 #
 ################################################################################
 
+def get_embs_df_from_patient_data(main_model, num_patient_files, patient_files, data_folder, verbose):
+    patients_embs = []
+    for i in range(num_patient_files):
+        if i > 12:
+            break
+        if verbose >= 2:
+            print('    {}/{}...'.format(i+1, num_patient_files))
+
+        # Load the current patient data and recordings.
+        current_patient_data = load_patient_data(patient_files[i])
+        num_locations = get_num_locations(current_patient_data)
+        recording_information = current_patient_data.split('\n')[1:num_locations+1]
+        recordings, frequencies = load_recordings(data_folder, current_patient_data, get_frequencies=True) 
+
+        #Extract Embeedings
+        embs_part, tss_part = openl3.get_audio_embedding(recordings, frequencies, hop_size=SECONDS_PER_EMBEDDING, batch_size=4,   verbose=1 , model=main_model)
+
+        #Prepare Features DataFrame
+        record_files = []
+        audios_embs = []
+        for i in range(num_locations):
+            entries = recording_information[i].split(' ')
+            filename = entries[2]
+            filepath = os.path.join(data_folder, filename)
+            recording_pos = recording_information[i].split(" ")[0]
+            audio_embs_df = pd.DataFrame(embs_part[i])
+            audio_embs_df[POS] = recording_pos
+            audio_embs_df[TIME] = tss_part[i]
+            audios_embs.append(audio_embs_df)
+        audios_embs_df = pd.concat(audios_embs)
+        audios_embs_df = audios_embs_df.reset_index(drop=True)
+
+        # If murmur present, remove places where it is not audible (not in #Murmur locations)
+        patient_data_series = pd.Series(current_patient_data.split('\n')[num_locations+1:])
+        murmur_locations = patient_data_series[patient_data_series.str.contains("Murmur location")].iloc[0].split(": ")[-1]
+        murmur_locations = murmur_locations.split("+")
+        for location in murmur_locations:
+            audios_embs_df = audios_embs_df[audios_embs_df[POS] != location]
+        
+        # Extract labels and use one-hot encoding.
+        current_labels = np.zeros(num_classes, dtype=int)
+        label = get_label(current_patient_data)
+        if label in classes:
+            j = classes.index(label)
+            current_labels[j] = 1
+        audios_embs_df[classes[0]] = current_labels[0]
+        audios_embs_df[classes[1]] = current_labels[1]
+        audios_embs_df[classes[2]] = current_labels[2]
+        audios_embs_df[ID] =  current_patient_data.split(" ")[0]
+        patients_embs.append(audios_embs_df)
+    all_patients_embs_df = pd.concat(patients_embs)
+    return all_patients_embs_df
+
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
-    SECONDS_PER_EMBEDDING = 2
     main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
     
     # Find data files.
     if verbose >= 1:
         print('Finding data files...')
-
 
     # Find the patient data files.
     patient_files = find_patient_files(data_folder)
@@ -41,62 +94,33 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     # Create a folder for the model if it does not already exist.
     os.makedirs(model_folder, exist_ok=True)
-
-    classes = ['Present', 'Unknown', 'Absent']
-    num_classes = len(classes)
-
     # Extract the features and labels.
     if verbose >= 1:
         print('Extracting features and labels from the Challenge data...')
+    
+    if False and os.path.exists(TEMP_FILE):
+        all_patients_embs_df = pd.read_pickle(TEMP_FILE)
+    else:
+        all_patients_embs_df = get_embs_df_from_patient_data(main_model, num_patient_files, patient_files, data_folder, verbose)
+        all_patients_embs_df.to_pickle(TEMP_FILE)
 
-    features = list()
-    labels = list()
-
-    for i in range(num_patient_files):
-        if verbose >= 2:
-            print('    {}/{}...'.format(i+1, num_patient_files))
-
-        # Load the current patient data and recordings.
-        current_patient_data = load_patient_data(patient_files[i])
-        num_locations = get_num_locations(current_patient_data)
-        recording_information = current_patient_data.split('\n')[1:num_locations+1]
-        recordings, frequencies = load_recordings(data_folder, current_patient_data, get_frequencies=True) 
-        record_files = []
-        for i in range(num_locations):
-            entries = recording_information[i].split(' ')
-            record_files.append(entries[2])
-        
-        #Get embedding for patient records
-        for wav_file in record_files:
-            filepath = os.path.join(data_folder, wav_file)
-            embs_part, tss_part = openl3.get_audio_embedding(recordings, frequencies, hop_size=SECONDS_PER_EMBEDDING, batch_size=4,   verbose=1 , model=main_model)
-
-        # Extract labels and use one-hot encoding.
-        current_labels = np.zeros(num_classes, dtype=int)
-        if label in classes:
-            j = classes.index(label)
-            current_labels[j] = 1
-        import ipdb;ipdb.set_trace()
-        pass
-
-    features = np.vstack(features)
-    labels = np.vstack(labels)
+    #Stratify Sample
+    X_train, X_test, y_train, y_test = train_test_split(all_patients_embs_df[range(0,512)].values, all_patients_embs_df[classes].values, test_size=0.2, random_state=42, stratify= all_patients_embs_df[classes].values.argmax(axis=1))
+    
 
     # Train the model.
     if verbose >= 1:
         print('Training model...')
 
     # Define parameters for random forest classifier.
-    n_estimators = 10    # Number of trees in the forest.
+    n_estimators = 100    # Number of trees in the forest.
     max_leaf_nodes = 100 # Maximum number of leaf nodes in each tree.
-    random_state = 123   # Random state; set for reproducibility.
+    random_state = 42   # Random state; set for reproducibility.
 
-    imputer = SimpleImputer().fit(features)
-    features = imputer.transform(features)
-    classifier = RandomForestClassifier(n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(features, labels)
-
+    classifier = RandomForestClassifier(n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(X_train, y_train)
+    print(classifier.score(X_test, y_test))
     # Save the model.
-    save_challenge_model(model_folder, classes, imputer, classifier)
+    save_challenge_model(model_folder, classes, classifier)
 
     if verbose >= 1:
         print('Done.')
@@ -139,8 +163,8 @@ def run_challenge_model(model, data, recordings, verbose):
 ################################################################################
 
 # Save your trained model.
-def save_challenge_model(model_folder, classes, imputer, classifier):
-    d = {'classes': classes, 'imputer': imputer, 'classifier': classifier}
+def save_challenge_model(model_folder, classes, classifier):
+    d = {'classes': classes, 'classifier': classifier}
     filename = os.path.join(model_folder, 'model.sav')
     joblib.dump(d, filename, protocol=0)
 

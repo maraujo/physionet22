@@ -5,6 +5,15 @@
 
 import os, numpy as np, scipy as sp, scipy.io, scipy.io.wavfile
 
+POS = "position"
+TIME = "time"
+LABEL = "label"
+ID = "ID"
+TEMP_FILE = "/tmp/cache_challege_df.pkl"
+SECONDS_PER_EMBEDDING = 2
+classes = ['Present', 'Unknown', 'Absent']
+num_classes = len(classes)
+
 # Check if a variable is a number or represents a number.
 def is_number(x):
     try:

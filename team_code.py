@@ -17,6 +17,7 @@ import openl3
 import pandas as pd
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
 
 ################################################################################
 #
@@ -27,8 +28,6 @@ from sklearn.model_selection import train_test_split
 def get_embs_df_from_patient_data(main_model, num_patient_files, patient_files, data_folder, verbose):
     patients_embs = []
     for i in range(num_patient_files):
-        if i > 12:
-            break
         if verbose >= 2:
             print('    {}/{}...'.format(i+1, num_patient_files))
 
@@ -60,8 +59,8 @@ def get_embs_df_from_patient_data(main_model, num_patient_files, patient_files, 
         patient_data_series = pd.Series(current_patient_data.split('\n')[num_locations+1:])
         murmur_locations = patient_data_series[patient_data_series.str.contains("Murmur location")].iloc[0].split(": ")[-1]
         murmur_locations = murmur_locations.split("+")
-        for location in murmur_locations:
-            audios_embs_df = audios_embs_df[audios_embs_df[POS] != location]
+        if not "nan" in murmur_locations:
+            audios_embs_df = audios_embs_df[audios_embs_df[POS].isin(murmur_locations)]
         
         # Extract labels and use one-hot encoding.
         current_labels = np.zeros(num_classes, dtype=int)
@@ -73,6 +72,7 @@ def get_embs_df_from_patient_data(main_model, num_patient_files, patient_files, 
         audios_embs_df[classes[1]] = current_labels[1]
         audios_embs_df[classes[2]] = current_labels[2]
         audios_embs_df[ID] =  current_patient_data.split(" ")[0]
+        print(current_patient_data.split(" ")[0], audios_embs_df.shape)
         patients_embs.append(audios_embs_df)
     all_patients_embs_df = pd.concat(patients_embs)
     return all_patients_embs_df
@@ -98,14 +98,15 @@ def train_challenge_model(data_folder, model_folder, verbose):
     if verbose >= 1:
         print('Extracting features and labels from the Challenge data...')
     
-    if False and os.path.exists(TEMP_FILE):
+    if os.path.exists(TEMP_FILE):
         all_patients_embs_df = pd.read_pickle(TEMP_FILE)
     else:
         all_patients_embs_df = get_embs_df_from_patient_data(main_model, num_patient_files, patient_files, data_folder, verbose)
         all_patients_embs_df.to_pickle(TEMP_FILE)
 
     #Stratify Sample
-    X_train, X_test, y_train, y_test = train_test_split(all_patients_embs_df[range(0,512)].values, all_patients_embs_df[classes].values, test_size=0.2, random_state=42, stratify= all_patients_embs_df[classes].values.argmax(axis=1))
+    all_patients_embs_df = all_patients_embs_df.reset_index(drop=True)
+    X_train, X_test, y_train, y_test = train_test_split(all_patients_embs_df[range(0,512)], all_patients_embs_df[classes], test_size=0.2, random_state=42, stratify= all_patients_embs_df[classes].values.argmax(axis=1))
     
 
     # Train the model.
@@ -117,8 +118,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
     max_leaf_nodes = 100 # Maximum number of leaf nodes in each tree.
     random_state = 42   # Random state; set for reproducibility.
 
-    classifier = RandomForestClassifier(n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(X_train, y_train)
-    print(classifier.score(X_test, y_test))
+    classifier = RandomForestClassifier(n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state, class_weight = [{0:5, 1: 100}, {0: 1, 1: 1}, {0: 1, 1: 5}])
+    classifier.fit(X_train, y_train)
+   
+    
+    #Check primarily results
+    if verbose >= 1:
+        print(classification_report(y_test, classifier.predict(X_test)))
+    
     # Save the model.
     save_challenge_model(model_folder, classes, classifier)
 
@@ -135,25 +142,24 @@ def load_challenge_model(model_folder, verbose):
 # arguments of this function.
 def run_challenge_model(model, data, recordings, verbose):
     classes = model['classes']
-    imputer = model['imputer']
     classifier = model['classifier']
-
-    # Load features.
-    features = get_features(data, recordings)
-
-    # Impute missing data.
-    features = features.reshape(1, -1)
-    features = imputer.transform(features)
-
-    # Get classifier probabilities.
-    probabilities = classifier.predict_proba(features)
-    probabilities = np.asarray(probabilities, dtype=np.float32)[:, 0, 1]
-
-    # Choose label with higher probability.
-    labels = np.zeros(len(classes), dtype=np.int_)
-    idx = np.argmax(probabilities)
-    labels[idx] = 1
-
+    frequency_sample_rate = int(data.split("\n")[0].split(" ")[2])
+    main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
+    embs_part, tss_part = openl3.get_audio_embedding(recordings, [frequency_sample_rate]*len(recordings), hop_size=SECONDS_PER_EMBEDDING, batch_size=4,   verbose=1 , model=main_model)
+    
+    audio_results = []
+    for emb_parts in embs_part:
+        audio_segs = pd.DataFrame(emb_parts)
+        result = classifier.predict(pd.DataFrame(audio_segs)).max(axis=0)
+        audio_results.append(result)
+        
+    if pd.DataFrame(audio_results)[0].max() > 0.5:
+        labels = [1,0,0]
+    elif pd.DataFrame(audio_results)[1].max() > 0.5:
+        labels = [0,1,0]
+    else:
+        labels = [0,0,1]
+    probabilities = result
     return classes, labels, probabilities
 
 ################################################################################

@@ -1,7 +1,11 @@
-FROM python:3.10.1-buster
+FROM python:3.8.12-buster
 
 ## The MAINTAINER instruction sets the author field of the generated images.
-MAINTAINER author@example.com
+MAINTAINER limadim@ccf.org
+
+
+RUN apt-get update -y && apt-get install -y --no-install-recommends build-essential gcc \
+                                        libsndfile1 
 
 ## DO NOT EDIT the 3 lines.
 RUN mkdir /physionet

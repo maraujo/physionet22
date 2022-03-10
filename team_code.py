@@ -34,7 +34,7 @@ SECONDS_PER_EMBEDDING = 2
 classes = ['Present', 'Unknown', 'Absent']
 num_classes = len(classes)
 main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
-SMALL_SAMPLE = True
+TRAIN_SMALL_SAMPLE = False
 
 def get_embs_df_from_patient_data(num_patient_files, patient_files, data_folder, verbose):
     patients_embs = []
@@ -42,7 +42,7 @@ def get_embs_df_from_patient_data(num_patient_files, patient_files, data_folder,
         if verbose >= 2:
             print('    {}/{}...'.format(i+1, num_patient_files))
             
-        if i > 50:
+        if TRAIN_SMALL_SAMPLE and i > 50:
             break
 
         # Load the current patient data and recordings.

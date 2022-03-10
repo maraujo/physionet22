@@ -25,11 +25,25 @@ from sklearn.metrics import classification_report
 #
 ################################################################################
 
-def get_embs_df_from_patient_data(main_model, num_patient_files, patient_files, data_folder, verbose):
+POS = "position"
+TIME = "time"
+LABEL = "label"
+ID = "ID"
+TEMP_FILE = "/tmp/cache_challege_df.pkl"
+SECONDS_PER_EMBEDDING = 2
+classes = ['Present', 'Unknown', 'Absent']
+num_classes = len(classes)
+main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
+SMALL_SAMPLE = True
+
+def get_embs_df_from_patient_data(num_patient_files, patient_files, data_folder, verbose):
     patients_embs = []
     for i in range(num_patient_files):
         if verbose >= 2:
             print('    {}/{}...'.format(i+1, num_patient_files))
+            
+        if i > 50:
+            break
 
         # Load the current patient data and recordings.
         current_patient_data = load_patient_data(patient_files[i])
@@ -79,7 +93,7 @@ def get_embs_df_from_patient_data(main_model, num_patient_files, patient_files, 
 
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
-    main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
+    # main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
     
     # Find data files.
     if verbose >= 1:
@@ -101,8 +115,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
     if os.path.exists(TEMP_FILE):
         all_patients_embs_df = pd.read_pickle(TEMP_FILE)
     else:
-        all_patients_embs_df = get_embs_df_from_patient_data(main_model, num_patient_files, patient_files, data_folder, verbose)
-        all_patients_embs_df.to_pickle(TEMP_FILE)
+        all_patients_embs_df = get_embs_df_from_patient_data(num_patient_files, patient_files, data_folder, verbose)
+        try:
+            all_patients_embs_df.to_pickle(TEMP_FILE)
+        except:
+            print("Could not save TEMP file")
 
     #Stratify Sample
     all_patients_embs_df = all_patients_embs_df.reset_index(drop=True)
@@ -144,7 +161,7 @@ def run_challenge_model(model, data, recordings, verbose):
     classes = model['classes']
     classifier = model['classifier']
     frequency_sample_rate = int(data.split("\n")[0].split(" ")[2])
-    main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
+    
     embs_part, tss_part = openl3.get_audio_embedding(recordings, [frequency_sample_rate]*len(recordings), hop_size=SECONDS_PER_EMBEDDING, batch_size=4,   verbose=1 , model=main_model)
     
     audio_results = []

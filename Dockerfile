@@ -15,4 +15,5 @@ WORKDIR /physionet
 ## Install your dependencies here using apt install, etc.
 
 ## Include the following line if you have a requirements.txt file.
+RUN pip install -U pip
 RUN pip install -r requirements.txt

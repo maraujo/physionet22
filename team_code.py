@@ -22,8 +22,8 @@ from sklearn.metrics import classification_report
 #
 ################################################################################
 
-from pycaret.classification import *
-from pycaret.classification import load_config
+from pycaret.classification import create_model, finalize_model, setup, predict_model, pull, save_model
+from pycaret.classification import load_config, save_config, load_model
 
 POS = "position"
 TIME = "time"
@@ -35,6 +35,7 @@ classes = ['Present', 'Unknown', 'Absent']
 num_classes = len(classes)
 main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
 TRAIN_SMALL_SAMPLE = False
+submission = True
 
 def get_embs_df_from_patient_data(num_patient_files, patient_files, data_folder, verbose):
     patients_embs = []
@@ -175,7 +176,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     exp = setup(data=train_data, test_data=test_data,
                 target='label', ignore_features=features_to_ignore, silent=True,
-                remove_perfect_collinearity=True,
+                remove_perfect_collinearity=True, fold=2,
                 normalize=True, normalize_method="robust",
                 fix_imbalance=True,
                 fold_strategy="groupkfold", fold_groups="ID",
@@ -214,7 +215,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # classifier = create_model("ridge", cross_validation=False)
     # classifier = tune_model(classifier, n_iter=100, optimize="Recall")
 
-    classifier = create_model("lightgbm")
+    classifier = create_model("lightgbm", )
     print("Starts with:", classifier)
     # classifier = tune_model(classifier, n_iter=200, optimize="F1", choose_better=True) # TODO: after many hours, it returned the same initial classifier
 

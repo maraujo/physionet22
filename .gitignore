@@ -284,3 +284,6 @@ model.sav
 
 test_outputs/
 train_outputs/
+
+.DS_Store
+local/

@@ -287,3 +287,4 @@ train_outputs/
 
 .DS_Store
 local/
+model

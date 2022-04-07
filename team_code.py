@@ -415,7 +415,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
 def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_cache=False):
 =======
     # download the pretrained model
-    download_model_from_url('https://raw.githubusercontent.com/maraujo/physionet22/dewen/models/model.pth?token=GHSAT0AAAAAABSVXRZ6SQ5LVHOK7SDHWIFCYSXUQSQ',model_folder,'model.pth')
+    download_model_from_url('https://www3.nd.edu/~scl/models/model.pth',model_folder,'model.pth')
     return 0
 >>>>>>> ad44dd9 (change to download from url)
 

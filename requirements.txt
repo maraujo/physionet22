@@ -5,4 +5,4 @@ joblib==1.1.0
 torch==1.11.0
 pandas==1.4.1
 tensorflow==2.8.0
-
+tqdm==4.63.1

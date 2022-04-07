@@ -41,11 +41,12 @@ from sklearn.metrics import classification_report
 
 POS = "position"
 TIME = "time"
+TIME_COUNTER = "time_counter"
 LABEL = "label"
 ID = "ID"
 NAVALUE = -1
 #TEMP_FILE = "/tmp/cache_challege_df.pkl"
-TEMP_FILE = "./cache_challege_df_long_extra.pkl"
+TEMP_FILE = "./cache_challege_df_long_extra_2d.pkl"
 SECONDS_PER_EMBEDDING = 2
 classes = ['Absent', 'Present', 'Unknown']  # Do not change the order
 UNK_OPT = "positive"
@@ -64,11 +65,13 @@ def extract_embbeding(recordings, frequencies, hop_size, num_locations, recordin
     for j in range(num_locations):
         entries = recording_information[j].split(' ')
         recording_pos = entries[0]
-        # filename = entries[2]
-        # filepath = os.path.join(data_folder, filename)
-        audio_embs_df = pd.DataFrame(embs_part[j].reshape(-1))
-        audio_embs_df = audio_embs_df.transpose()
+        # audio_embs_df = pd.DataFrame(embs_part[j].reshape(-1))
+        # audio_embs_df = audio_embs_df.transpose()
+
+        audio_embs_df = pd.DataFrame(embs_part[j])
         audio_embs_df[POS] = recording_pos
+        audio_embs_df[TIME] = tss_part[j]
+        audio_embs_df[TIME_COUNTER] = range(len(tss_part[j]))
         if murmur_locations:
             audio_embs_df["has_murmur"] = recording_pos in murmur_locations
         audios_embs.append(audio_embs_df)
@@ -111,13 +114,13 @@ def get_embs_df_from_patient_data_long(num_patient_files, patient_files, data_fo
         audios_embs_df["augmented"] = False
         audios_embs_df["seconds"] = SECONDS_PER_EMBEDDING
 
-        if label == "Present":
-            for extra in [SECONDS_PER_EMBEDDING-1, SECONDS_PER_EMBEDDING-0.5, SECONDS_PER_EMBEDDING+0.5,
-                          SECONDS_PER_EMBEDDING+1, SECONDS_PER_EMBEDDING+1.5, SECONDS_PER_EMBEDDING+2]:
-                extradf = extract_embbeding(recordings, frequencies, extra, num_locations, recording_information, murmur_locations)
-                extradf["augmented"] = True
-                extradf["seconds"] = extra
-                audios_embs_df = pd.concat([audios_embs_df, extradf])
+        # if label == "Present":
+        for extra in [SECONDS_PER_EMBEDDING-1, SECONDS_PER_EMBEDDING-0.5, SECONDS_PER_EMBEDDING+0.5,
+                      SECONDS_PER_EMBEDDING+1, SECONDS_PER_EMBEDDING+1.5, SECONDS_PER_EMBEDDING+2]:
+            extradf = extract_embbeding(recordings, frequencies, extra, num_locations, recording_information, murmur_locations)
+            extradf["augmented"] = True
+            extradf["seconds"] = extra
+            audios_embs_df = pd.concat([audios_embs_df, extradf])
 
         if label in classes:
             j = classes.index(label)
@@ -162,8 +165,25 @@ class SimpleCNNBlock(Model):
             x = self.maxpool(x)
         return x
 
+class SimpleCNNBlock2D(Model):
+    def __init__(self, filters, kernelsize, cnnact="relu", batchnorm=False, maxpool=False):
+        super().__init__()
 
-class ResidualBlock(Model):
+        self.use_batchnorm = batchnorm
+        self.use_maxpool = maxpool
+        self.cnn = layers.Conv2D(filters, kernelsize, activation=cnnact, padding='same')
+        self.batchnorm = layers.BatchNormalization()
+        self.maxpool = layers.MaxPooling2D((2,2))
+
+    def call(self, input, training=False):
+        x = self.cnn(input)
+        if self.use_batchnorm:
+            x = self.batchnorm(x)
+        if self.use_maxpool:
+            x = self.maxpool(x)
+        return x
+
+class ResidualBlock1D(Model):
 
     def __init__(self, filters, kernelsize):
         super().__init__()
@@ -189,6 +209,31 @@ class ResidualBlock(Model):
         out = self.lastbatchnorm(out)
         return out
 
+class ResidualBlock2D(Model):
+
+    def __init__(self, filters, kernelsize):
+        super().__init__()
+
+        self.cnn1 = layers.Conv2D(filters, kernelsize, activation=layers.LeakyReLU(), padding='same')
+        self.cnn2 = layers.Conv2D(filters, kernelsize, activation=layers.LeakyReLU(), padding='same')
+        self.cnn3 = layers.Conv2D(filters, kernelsize, padding='same')
+        self.batchnorm1 = layers.BatchNormalization()
+        self.batchnorm2 = layers.BatchNormalization()
+        self.averagepool = layers.AveragePooling2D()
+        self.lastbatchnorm = layers.BatchNormalization()
+        self.relu = layers.ReLU()
+        self.add = layers.Add()
+
+    def call(self, input, training=False):
+        x1 = self.batchnorm1(self.cnn1(input))
+        x1 = self.batchnorm2(self.cnn2(x1))
+
+        x2 = self.cnn3(input)
+
+        out = self.add([x1, x2])
+        out = self.relu(out)
+        out = self.lastbatchnorm(out)
+        return out
 
 class MyNetwork(Model):
     def __init__(self, outputsize, internal_dim=4):
@@ -198,10 +243,10 @@ class MyNetwork(Model):
         self.masked_layer = layers.Masking(mask_value=NAVALUE)
 
 
-        self.cnnblock1 = SimpleCNNBlock(internal_dim, 3, "relu", batchnorm=False, maxpool=False)
-        self.cnnblock2 = SimpleCNNBlock(internal_dim, 5, "softplus", batchnorm=False, maxpool=False)
-        self.cnnblock3 = SimpleCNNBlock(internal_dim, 7, "relu", batchnorm=False, maxpool=False)
-        self.cnnblock4 = SimpleCNNBlock(internal_dim, 7, layers.ThresholdedReLU(theta=1.0), batchnorm=False, maxpool=False)
+        self.cnnblock1 = SimpleCNNBlock2D(internal_dim, (3, 3), "relu", batchnorm=False, maxpool=False)
+        self.cnnblock2 = SimpleCNNBlock2D(internal_dim, (5, 5), "softplus", batchnorm=False, maxpool=False)
+        self.cnnblock3 = SimpleCNNBlock2D(internal_dim, (7, 7), "relu", batchnorm=False, maxpool=False)
+        self.cnnblock4 = SimpleCNNBlock2D(internal_dim, (7, 7), layers.ThresholdedReLU(theta=1.0), batchnorm=False, maxpool=False)
 
         # self.cnn2 = layers.Conv1D(internal_dim, 5, activation='softplus', name="CNN2", padding='same')
         # self.cnn3 = layers.Conv1D(internal_dim, 7, activation='relu', name="CNN3", padding='same')
@@ -212,12 +257,12 @@ class MyNetwork(Model):
         # self.cnn8 = layers.Conv1D(internal_dim, 11, activation='relu', name="CNN8", padding='same')
         # self.cnn9 = layers.Conv1D(internal_dim, kernel_size=5, padding='same', activation=layers.ThresholdedReLU(theta=1.0))
 
-        self.resblock1 = ResidualBlock(internal_dim, 5)
-        self.resblock2 = ResidualBlock(internal_dim, 7)
-        self.resblock3 = ResidualBlock(internal_dim, 11)
+        self.resblock1 = ResidualBlock2D(internal_dim, (5, 5))
+        self.resblock2 = ResidualBlock2D(internal_dim, (7, 7))
+        self.resblock3 = ResidualBlock2D(internal_dim, (11, 11))
 
-        self.maxpool = layers.MaxPooling1D(2)
-        self.gmaxpool = layers.GlobalMaxPooling1D()
+        self.maxpool = layers.MaxPooling2D((2, 2))
+        self.gmaxpool = layers.GlobalMaxPooling2D()
 
         self.batchnorm = layers.BatchNormalization()
 
@@ -230,6 +275,7 @@ class MyNetwork(Model):
         self.dropout30 = layers.Dropout(0.30)
         self.dropout20 = layers.Dropout(0.20)
         self.dropout50 = layers.Dropout(0.50)
+        self.dropout80 = layers.Dropout(0.80)
         # self.lstm = layers.Bidirectional(layers.LSTM(internal_dim, return_sequences=True, dropout=.2))
         # self.lstm = layers.LSTM(internal_dim)
         #
@@ -246,13 +292,14 @@ class MyNetwork(Model):
 
         masked = self.masked_layer(input)
 
-        x = self.cnnblock1(masked)
-        x = self.dropout30(x)
-        x = self.cnnblock2(x)
-        x = self.dropout20(x)
-        # x = self.cnnblock3(x)
-        # x = self.dropout20(x)
-        # x = self.cnnblock4(x)
+        x1 = self.cnnblock1(masked)
+        x1 = self.dropout80(x1)
+        x2 = self.cnnblock2(masked)
+        x2 = self.dropout80(x2)
+        x3 = self.cnnblock3(masked)
+        x3 = self.dropout80(x3)
+        x4 = self.cnnblock4(masked)
+        x4 = self.dropout80(x4)
 
         # x1 = self.batchnorm(self.cnn1(masked))
         # x2 = self.batchnorm(self.cnn2(masked))
@@ -264,7 +311,7 @@ class MyNetwork(Model):
         # x8 = self.batchnorm(self.cnn8(masked))
         # x9 = self.batchnorm(self.cnn9(masked))
 
-        resout = self.resblock1(x)
+        resout = self.resblock1(x1 + x2 + x3 + x4)
         resout = self.dropout50(resout)
         resout = self.resblock2(resout)
         resout = self.dropout50(resout)
@@ -281,7 +328,7 @@ class MyNetwork(Model):
         x = self.gmaxpool(resout)
         # x = self.flatten(masked)
 
-        print("Shape 3:", x.shape)
+        # print("Shape 3:", x.shape)
         # x = self.linear1(x)
         out = self.outputlayer(x)
 
@@ -304,15 +351,15 @@ def do_network_training(X_train, X_test, y_train, y_test):
                                                     min_delta=0, verbose=0)
 
     model.compile(optimizer=tfa.optimizers.AdamW(lr_schedule),
-                    loss=tfa.losses.SigmoidFocalCrossEntropy(),
-                    #loss=losses.CategoricalCrossentropy()
+                    #loss=tfa.losses.SigmoidFocalCrossEntropy(),
+                    loss=losses.CategoricalCrossentropy(label_smoothing=0.1)
                     )
 
     # class_weight = {0: 1.,
     #                 1: 1.,
     #                 2: 25.}
-    class_weight = {0: 1.,
-                    1: 1.,
+    class_weight = {0: 1.3,
+                    1: 1,
                     }
 
     with tf.device('/cpu:0'):
@@ -331,42 +378,53 @@ def do_network_training(X_train, X_test, y_train, y_test):
     return model
 
 def regroup(df, fillna_value=NAVALUE):
-    new_idx = [(id, pos) for id in df["ID"].unique() for pos in ['AV', 'PV', 'TV', 'MV']]
-    df = df.drop_duplicates(subset=["ID", "position"])
-    df = df.set_index(["ID", "position"]).reindex(new_idx).reset_index()
-    df[classes] = df.groupby("ID")[classes].fillna(method="ffill").fillna(method="bfill")
+
+    #new_idx = [(id, time, pos) for id in df[ID].unique() for pos in ['AV', 'PV', 'TV', 'MV'] for time in df[TIME_COUNTER].unique()]
+    new_idx = [(id, time, pos) for id in df[ID].unique() for pos in ['AV', 'PV', 'TV', 'MV'] for time in range(32)]
+    df = df.drop_duplicates(subset=[ID, TIME_COUNTER, POS])
+    df = df.set_index([ID, TIME_COUNTER, POS]).reindex(new_idx).reset_index()
+    df[classes] = df.groupby(ID)[classes].fillna(method="ffill").fillna(method="bfill")
     return df.fillna(fillna_value)
 
-def get_numpy(df, get_y=True, fillna_value=NAVALUE):
-    if UNK_OPT == "positive":
+def get_numpy(df_in, get_y=True, fillna_value=NAVALUE):
+    if UNK_OPT in ["positive", "remove"]:
         considered_classes = ['Absent', 'Present']
     else:
         considered_classes = classes
 
     # In case this dataframe does not have all cols, we add them on the fly here.
-    if 16 * EMBEDDING_SIZE not in df:
-        df = df.reindex(columns=["ID"] + list(range(16 * EMBEDDING_SIZE))).fillna(fillna_value)
+    # if 16 * EMBEDDING_SIZE not in df:
+    #     df = df.reindex(columns=["ID"] + list(range(16 * EMBEDDING_SIZE))).fillna(fillna_value)
+    df = df_in.copy()
+    # for r in range(EMBEDDING_SIZE):
+    #     df[r] = df[r].mean() / df[r].std()
 
-    xt = df.loc[:, range(16 * EMBEDDING_SIZE)].values
+    xt = df.loc[:, range(EMBEDDING_SIZE)].values
+    #xt = (xt.mean() / xt.std())
+
     if get_y:
-        yt = df.loc[:, considered_classes].values
+        yt = df.loc[:, considered_classes].astype(int).values
 
-    g = df.reset_index().groupby("ID")
+    g = df.reset_index().groupby([ID, POS])
     xtg = [xt[i.values, :] for k, i in g.groups.items()]
     if get_y:
         ytg = [yt[i.values, :] for k, i in g.groups.items()]
+        ytg = np.array(ytg)
+        ytg = ytg.reshape(df[ID].unique().shape[0], -1)[:, 0:len(considered_classes)]
 
     xtg = np.array(xtg)
-    xtg = np.swapaxes(xtg, 1, 2)
+    # xtg = xtg.reshape(-1, 4, df[TIME_COUNTER].unique().shape[0], 512)
+    xtg = xtg.reshape(-1, 4, 32, 512)
+    # xtg = np.swapaxes(xtg, 1, 2)
+
     if get_y:
-        return xtg, np.array(ytg).mean(axis=1)
+        return xtg, ytg
     else:
         return xtg
 
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose, submission=False):
     # What should we do with Unknown (?): options "nothing", "positive", "remove"
-
 
     # Find data files.
     if verbose >= 1:
@@ -411,6 +469,9 @@ def train_challenge_model(data_folder, model_folder, verbose, submission=False):
     seed = 42
     np.random.seed(seed)
 
+    all_patients_embs_df = all_patients_embs_df[(all_patients_embs_df["augmented"] == False) |
+                                                ((all_patients_embs_df["Present"] == True) & (all_patients_embs_df["augmented"] == True))
+                                                ]  # Or we could just drop these instances
     pids = all_patients_embs_df["ID"].unique()
     np.random.shuffle(pids)
 
@@ -436,7 +497,6 @@ def train_challenge_model(data_folder, model_folder, verbose, submission=False):
     X_test = tf.convert_to_tensor(X_test, tf.float32)
     y_train = y_train.astype('float32')
     y_test = y_test.astype('float32')
-
 
     model = do_network_training(X_train, X_test, y_train, y_test)
 
@@ -483,16 +543,16 @@ def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_c
     probs = model.predict(X_test)[0]
 
     pred = np.zeros(3)
-    if probs[1] >= 0.5:
+    if probs[1] >= 0.49:
         pred[1] = 1
-    elif probs[1] > 0.2:
+    elif probs[1] > 0.45:
         pred[2] = 1
     else:
         if df_input["Present"].sum() > 1:
             print("PID:", pid)
         pred[0] = 1
 
-    if UNK_OPT == "positive":
+    if UNK_OPT in ["positive", "remove"]:
         # probs would have only the labels to "absent", "present". Here we append the prob of 0.0 to unknown
         # An alternative is assingin the unknown class in case "present" or "absent" is no so strong (i.e., both close to 0.5)
         if pred[2] != 1:

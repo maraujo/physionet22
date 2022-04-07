@@ -185,7 +185,7 @@ class ResNet1d(nn.Module):
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
     # download the pretrained model
-    download_model_from_url('https://raw.githubusercontent.com/maraujo/physionet22/dewen/models/model.pth?token=GHSAT0AAAAAABSVXRZ6SQ5LVHOK7SDHWIFCYSXUQSQ',model_folder,'model.pth')
+    download_model_from_url('https://www3.nd.edu/~scl/models/model.pth',model_folder,'model.pth')
     return 0
 
 # Load your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the

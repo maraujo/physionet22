@@ -14,6 +14,23 @@ from helper_code import *
 import numpy as np, pandas as pd, scipy as sp, scipy.stats, os, sys, joblib
 import openl3
 
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+import seaborn as sns
+
+from sklearn import metrics
+from sklearn.metrics import accuracy_score, precision_score, recall_score, classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split
+from tensorflow.keras import layers, losses
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.models import Model
+from sklearn import preprocessing
+import tensorflow_addons as tfa
+
+
 from sklearn.metrics import classification_report
 
 ################################################################################
@@ -22,22 +39,45 @@ from sklearn.metrics import classification_report
 #
 ################################################################################
 
-from pycaret.classification import create_model, finalize_model, setup, predict_model, pull, save_model
-from pycaret.classification import load_config, save_config, load_model
-
 POS = "position"
 TIME = "time"
 LABEL = "label"
 ID = "ID"
-TEMP_FILE = "/tmp/cache_challege_df.pkl"
+NAVALUE = -1
+#TEMP_FILE = "/tmp/cache_challege_df.pkl"
+TEMP_FILE = "./cache_challege_df_long_extra.pkl"
 SECONDS_PER_EMBEDDING = 2
-classes = ['Present', 'Unknown', 'Absent']
-num_classes = len(classes)
-main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
+classes = ['Absent', 'Present', 'Unknown']  # Do not change the order
+UNK_OPT = "positive"
+EMBEDDING_SIZE = 512
+main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=EMBEDDING_SIZE)
 TRAIN_SMALL_SAMPLE = False
-submission = True
 
-def get_embs_df_from_patient_data(num_patient_files, patient_files, data_folder, verbose):
+def extract_embbeding(recordings, frequencies, hop_size, num_locations, recording_information, murmur_locations):
+
+    # Extract Embeedings
+    embs_part, tss_part = openl3.get_audio_embedding(recordings, frequencies, hop_size=hop_size,
+                                                     batch_size=4, verbose=1, model=main_model)
+
+    # Prepare Features DataFrame
+    audios_embs = []
+    for j in range(num_locations):
+        entries = recording_information[j].split(' ')
+        recording_pos = entries[0]
+        # filename = entries[2]
+        # filepath = os.path.join(data_folder, filename)
+        audio_embs_df = pd.DataFrame(embs_part[j].reshape(-1))
+        audio_embs_df = audio_embs_df.transpose()
+        audio_embs_df[POS] = recording_pos
+        if murmur_locations:
+            audio_embs_df["has_murmur"] = recording_pos in murmur_locations
+        audios_embs.append(audio_embs_df)
+
+    audios_embs_df = pd.concat(audios_embs)
+    return audios_embs_df.reset_index(drop=True)
+
+
+def get_embs_df_from_patient_data_long(num_patient_files, patient_files, data_folder, verbose):
     patients_embs = []
     for i in range(num_patient_files):
         if verbose >= 2:
@@ -63,29 +103,22 @@ def get_embs_df_from_patient_data(num_patient_files, patient_files, data_folder,
         murmur_locations = patient_data_series[patient_data_series.str.contains("Murmur location")].iloc[0].split(": ")[-1]
         murmur_locations = murmur_locations.split("+")
 
-        #Extract Embeedings
-        embs_part, tss_part = openl3.get_audio_embedding(recordings, frequencies, hop_size=SECONDS_PER_EMBEDDING, batch_size=4, verbose=1, model=main_model)
-
-        #Prepare Features DataFrame
-        record_files = []
-        audios_embs = []
-        for j in range(num_locations):
-            entries = recording_information[j].split(' ')
-            recording_pos = entries[0]
-            # filename = entries[2]
-            # filepath = os.path.join(data_folder, filename)
-            audio_embs_df = pd.DataFrame(embs_part[j])
-            audio_embs_df[POS] = recording_pos
-            audio_embs_df[TIME] = tss_part[j]
-            audio_embs_df["has_murmur"] = recording_pos in murmur_locations
-            audios_embs.append(audio_embs_df)
-
-        audios_embs_df = pd.concat(audios_embs)
-        audios_embs_df = audios_embs_df.reset_index(drop=True)
+        audios_embs_df = extract_embbeding(recordings, frequencies, SECONDS_PER_EMBEDDING, num_locations, recording_information, murmur_locations)
 
         # Extract labels and use one-hot encoding.
-        current_labels = np.zeros(num_classes, dtype=int)
+        current_labels = np.zeros(len(classes), dtype=int)
         label = get_label(current_patient_data)
+        audios_embs_df["augmented"] = False
+        audios_embs_df["seconds"] = SECONDS_PER_EMBEDDING
+
+        if label == "Present":
+            for extra in [SECONDS_PER_EMBEDDING-1, SECONDS_PER_EMBEDDING-0.5, SECONDS_PER_EMBEDDING+0.5,
+                          SECONDS_PER_EMBEDDING+1, SECONDS_PER_EMBEDDING+1.5, SECONDS_PER_EMBEDDING+2]:
+                extradf = extract_embbeding(recordings, frequencies, extra, num_locations, recording_information, murmur_locations)
+                extradf["augmented"] = True
+                extradf["seconds"] = extra
+                audios_embs_df = pd.concat([audios_embs_df, extradf])
+
         if label in classes:
             j = classes.index(label)
             current_labels[j] = 1
@@ -111,10 +144,229 @@ def copy_test_data(test_ids, source, dest):
         for f in Path(source).glob(pid + "*"):
             shutil.copyfile(f, os.path.join(dest, os.path.basename(f)))
 
+class SimpleCNNBlock(Model):
+    def __init__(self, filters, kernelsize, cnnact="relu", batchnorm=False, maxpool=False):
+        super().__init__()
+
+        self.use_batchnorm = batchnorm
+        self.use_maxpool = maxpool
+        self.cnn = layers.Conv1D(filters, kernelsize, activation=cnnact, padding='same')
+        self.batchnorm = layers.BatchNormalization()
+        self.maxpool = layers.MaxPooling1D(2)
+
+    def call(self, input, training=False):
+        x = self.cnn(input)
+        if self.use_batchnorm:
+            x = self.batchnorm(x)
+        if self.use_maxpool:
+            x = self.maxpool(x)
+        return x
+
+
+class ResidualBlock(Model):
+
+    def __init__(self, filters, kernelsize):
+        super().__init__()
+
+        self.cnn1 = layers.Conv1D(filters, kernelsize, activation=layers.LeakyReLU(), padding='same')
+        self.cnn2 = layers.Conv1D(filters, kernelsize, activation=layers.LeakyReLU(), padding='same')
+        self.cnn3 = layers.Conv1D(filters, kernelsize, padding='same')
+        self.batchnorm1 = layers.BatchNormalization()
+        self.batchnorm2 = layers.BatchNormalization()
+        self.averagepool = layers.AveragePooling1D()
+        self.lastbatchnorm = layers.BatchNormalization()
+        self.relu = layers.ReLU()
+        self.add = layers.Add()
+
+    def call(self, input, training=False):
+        x1 = self.batchnorm1(self.cnn1(input))
+        x1 = self.batchnorm2(self.cnn2(x1))
+
+        x2 = self.cnn3(input)
+
+        out = self.add([x1, x2])
+        out = self.relu(out)
+        out = self.lastbatchnorm(out)
+        return out
+
+
+class MyNetwork(Model):
+    def __init__(self, outputsize, internal_dim=4):
+        super().__init__()
+        self.outputsize = outputsize
+
+        self.masked_layer = layers.Masking(mask_value=NAVALUE)
+
+
+        self.cnnblock1 = SimpleCNNBlock(internal_dim, 3, "relu", batchnorm=False, maxpool=False)
+        self.cnnblock2 = SimpleCNNBlock(internal_dim, 5, "softplus", batchnorm=False, maxpool=False)
+        self.cnnblock3 = SimpleCNNBlock(internal_dim, 7, "relu", batchnorm=False, maxpool=False)
+        self.cnnblock4 = SimpleCNNBlock(internal_dim, 7, layers.ThresholdedReLU(theta=1.0), batchnorm=False, maxpool=False)
+
+        # self.cnn2 = layers.Conv1D(internal_dim, 5, activation='softplus', name="CNN2", padding='same')
+        # self.cnn3 = layers.Conv1D(internal_dim, 7, activation='relu', name="CNN3", padding='same')
+        # self.cnn4 = layers.Conv1D(internal_dim, 21, activation='softplus', name="CNN4", padding='same')
+        # self.cnn5 = layers.Conv1D(internal_dim, 9, activation='relu', name="CNN5", padding='same')
+        # self.cnn6 = layers.Conv1D(internal_dim, 4, activation='softplus', name="CNN6", padding='same')
+        # self.cnn7 = layers.Conv1D(internal_dim, 7, activation='tanh', name="CNN7", padding='same')
+        # self.cnn8 = layers.Conv1D(internal_dim, 11, activation='relu', name="CNN8", padding='same')
+        # self.cnn9 = layers.Conv1D(internal_dim, kernel_size=5, padding='same', activation=layers.ThresholdedReLU(theta=1.0))
+
+        self.resblock1 = ResidualBlock(internal_dim, 5)
+        self.resblock2 = ResidualBlock(internal_dim, 7)
+        self.resblock3 = ResidualBlock(internal_dim, 11)
+
+        self.maxpool = layers.MaxPooling1D(2)
+        self.gmaxpool = layers.GlobalMaxPooling1D()
+
+        self.batchnorm = layers.BatchNormalization()
+
+        #
+        self.flatten = layers.Flatten()
+        self.linear1 = layers.Dense(32, activation='relu', name="Linear1")
+        #self.linear2 = layers.Dense(128, activation='relu', name="Linear2")
+        #self.linear3 = layers.Dense(32, activation='relu', name="Linear3")
+        #
+        self.dropout30 = layers.Dropout(0.30)
+        self.dropout20 = layers.Dropout(0.20)
+        self.dropout50 = layers.Dropout(0.50)
+        # self.lstm = layers.Bidirectional(layers.LSTM(internal_dim, return_sequences=True, dropout=.2))
+        # self.lstm = layers.LSTM(internal_dim)
+        #
+        self.outputlayer = layers.Dense(self.outputsize, activation='softmax', name="DenseSoftMax")
+        # self.cnnoutlayer = tf.keras.layers.Conv1D(3, 1, activation='softmax', padding='same', name="CNNout")
+
+
+    # def summary(self):
+    #     x = tf.keras.layers.Input(shape=(None, 16 * EMBEDDING_SIZE, 4))
+    #     model = Model(inputs=[x], outputs=self.call(x))
+    #     return model.summary()
+
+    def call(self, input, training=False):
+
+        masked = self.masked_layer(input)
+
+        x = self.cnnblock1(masked)
+        x = self.dropout30(x)
+        x = self.cnnblock2(x)
+        x = self.dropout20(x)
+        # x = self.cnnblock3(x)
+        # x = self.dropout20(x)
+        # x = self.cnnblock4(x)
+
+        # x1 = self.batchnorm(self.cnn1(masked))
+        # x2 = self.batchnorm(self.cnn2(masked))
+        # x3 = self.batchnorm(self.cnn3(masked))
+        # x4 = self.batchnorm(self.cnn4(masked))
+        # x5 = self.batchnorm(self.cnn5(masked))
+        # x6 = self.batchnorm(self.cnn6(masked))
+        # x7 = self.batchnorm(self.cnn7(masked))
+        # x8 = self.batchnorm(self.cnn8(masked))
+        # x9 = self.batchnorm(self.cnn9(masked))
+
+        resout = self.resblock1(x)
+        resout = self.dropout50(resout)
+        resout = self.resblock2(resout)
+        resout = self.dropout50(resout)
+        resout = self.resblock3(resout)
+        resout = self.dropout50(resout)
+        # print("Shape resout:", resout.shape)
+        #
+        # # concat = tf.keras.layers.Concatenate(axis=2)([x1, x2, x3, x4, x5, x6, x7, x8, x9, resout])
+        # concat = tf.keras.layers.Concatenate(axis=2)([x1, x2, x3, x4, resout])
+        # resout = self.lstm(resout)
+
+        #x = self.lstm(concat)
+        # print("Shape 2:", concat.shape)
+        x = self.gmaxpool(resout)
+        # x = self.flatten(masked)
+
+        print("Shape 3:", x.shape)
+        # x = self.linear1(x)
+        out = self.outputlayer(x)
+
+        return out
+
+
+def do_network_training(X_train, X_test, y_train, y_test):
+
+    MAX_EPOCHS = 300
+    #MAX_EPOCHS = 10
+
+    model = MyNetwork(y_train.shape[1])
+
+    lr = 0.0001
+    patience = 12
+
+    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(lr, decay_steps=100000, decay_rate=0.98, staircase=True)
+
+    earlystopper = tf.keras.callbacks.EarlyStopping(patience=patience, monitor='val_loss', mode='auto',
+                                                    min_delta=0, verbose=0)
+
+    model.compile(optimizer=tfa.optimizers.AdamW(lr_schedule),
+                    loss=tfa.losses.SigmoidFocalCrossEntropy(),
+                    #loss=losses.CategoricalCrossentropy()
+                    )
+
+    # class_weight = {0: 1.,
+    #                 1: 1.,
+    #                 2: 25.}
+    class_weight = {0: 1.,
+                    1: 1.,
+                    }
+
+    with tf.device('/cpu:0'):
+        model.fit(X_train, y_train,
+                  epochs=MAX_EPOCHS,
+                  shuffle=True,
+                  batch_size=64,
+                  validation_data=(X_test, y_test),
+                  callbacks=[earlystopper],
+                  class_weight=class_weight,
+                  )
+
+    model.summary()
+
+
+    return model
+
+def regroup(df, fillna_value=NAVALUE):
+    new_idx = [(id, pos) for id in df["ID"].unique() for pos in ['AV', 'PV', 'TV', 'MV']]
+    df = df.drop_duplicates(subset=["ID", "position"])
+    df = df.set_index(["ID", "position"]).reindex(new_idx).reset_index()
+    df[classes] = df.groupby("ID")[classes].fillna(method="ffill").fillna(method="bfill")
+    return df.fillna(fillna_value)
+
+def get_numpy(df, get_y=True, fillna_value=NAVALUE):
+    if UNK_OPT == "positive":
+        considered_classes = ['Absent', 'Present']
+    else:
+        considered_classes = classes
+
+    # In case this dataframe does not have all cols, we add them on the fly here.
+    if 16 * EMBEDDING_SIZE not in df:
+        df = df.reindex(columns=["ID"] + list(range(16 * EMBEDDING_SIZE))).fillna(fillna_value)
+
+    xt = df.loc[:, range(16 * EMBEDDING_SIZE)].values
+    if get_y:
+        yt = df.loc[:, considered_classes].values
+
+    g = df.reset_index().groupby("ID")
+    xtg = [xt[i.values, :] for k, i in g.groups.items()]
+    if get_y:
+        ytg = [yt[i.values, :] for k, i in g.groups.items()]
+
+    xtg = np.array(xtg)
+    xtg = np.swapaxes(xtg, 1, 2)
+    if get_y:
+        return xtg, np.array(ytg).mean(axis=1)
+    else:
+        return xtg
 
 # Train your model.
-def train_challenge_model(data_folder, model_folder, verbose):
-    # main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
+def train_challenge_model(data_folder, model_folder, verbose, submission=False):
+    # What should we do with Unknown (?): options "nothing", "positive", "remove"
+
 
     # Find data files.
     if verbose >= 1:
@@ -138,29 +390,23 @@ def train_challenge_model(data_folder, model_folder, verbose):
         print(TEMP_FILE)
         all_patients_embs_df = pd.read_pickle(TEMP_FILE)
     else:
-        all_patients_embs_df = get_embs_df_from_patient_data(num_patient_files, patient_files, data_folder, verbose)
+        all_patients_embs_df = get_embs_df_from_patient_data_long(num_patient_files, patient_files, data_folder, verbose)
         try:
             all_patients_embs_df.to_pickle(TEMP_FILE)
         except:
             print("Could not save TEMP file")
 
     #Stratify Sample
-    all_patients_embs_df = all_patients_embs_df.reset_index(drop=True)
-    ######
-    print("Running Pycaret:")
-
-    # What should we do with Unknown (?)
-    UNK_OPT = "positive"
+    all_patients_embs_df.sort_values(by=["ID", "position"]).reset_index(drop=True)
 
     if UNK_OPT == "positive":
-        all_patients_embs_df.loc[all_patients_embs_df["Unknown"] == True, "has_murmur"] = True   # We could assume that unknown is positive label
+        # all_patients_embs_df.loc[all_patients_embs_df["Unknown"] == True, "has_murmur"] = True   # We could assume that unknown is positive label
+        all_patients_embs_df.loc[all_patients_embs_df["Unknown"] == True, "Present"] = True  # We could assume that unknown is positive label
+        all_patients_embs_df.loc[all_patients_embs_df["Unknown"] == True, "Unknown"] = False
     elif UNK_OPT == "remove":
         all_patients_embs_df = all_patients_embs_df[all_patients_embs_df["Unknown"] != True]  # Or we could just drop these instances
     else:
         pass
-
-    features_to_ignore = ["Present", "Unknown", "Absent", "ID", "time", "position", "has_murmur"]
-    all_patients_embs_df["label"] = all_patients_embs_df["has_murmur"]
 
     seed = 42
     np.random.seed(seed)
@@ -174,85 +420,47 @@ def train_challenge_model(data_folder, model_folder, verbose):
     train_data = all_patients_embs_df[all_patients_embs_df["ID"].isin(train_ids)]
     test_data = all_patients_embs_df[all_patients_embs_df["ID"].isin(test_ids)]
 
-    exp = setup(data=train_data, test_data=test_data,
-                target='label', ignore_features=features_to_ignore, silent=True,
-                remove_perfect_collinearity=True, fold=2,
-                normalize=True, normalize_method="robust",
-                fix_imbalance=True,
-                fold_strategy="groupkfold", fold_groups="ID",
-                use_gpu=False, session_id=seed)
+    train_data = train_data.reset_index(drop=True)
+    train_data.loc[train_data["seconds"] != 2, "ID"] = train_data[train_data["seconds"] != 2][["ID", "seconds"]].apply(lambda x: str(x[0]) + "_" + str(x[1]), axis=1)
+
+    train_data = regroup(train_data)  # Shape should be something like (-1, 4, 16*512)
+    test_data = regroup(test_data)
+
+    X_train, y_train = get_numpy(train_data)
+    X_test, y_test = get_numpy(test_data)
 
     if not submission:
-        copy_test_data(test_ids, "/home/palotti/github/physionet22/all_training_data/", "/home/palotti/github/physionet22/test_data/")
+        copy_test_data(test_ids, "all_training_data/", "test_data/")
 
-    # top3 = compare_models(include=["et", "rf", "lda", "lr", "ridge", "lightgbm", "gbc", "xgboost"],  n_select=3)
-    # top3 = compare_models(include=["lda", "lr", "ridge", "lightgbm", "dummy"], n_select=3, sort='F1')
-    # top3 = compare_models(include=["et", "rf", "lda", "lr", "ridge", "lightgbm"], n_select=3)
-    # classifier = compare_models(include=["rf"], n_select=1)
+    X_train = tf.convert_to_tensor(X_train, tf.float32)
+    X_test = tf.convert_to_tensor(X_test, tf.float32)
+    y_train = y_train.astype('float32')
+    y_test = y_test.astype('float32')
 
-    # rf = RandomForestClassifier(n_estimators=100, max_leaf_nodes=100, random_state=42,)
-    # classifier = create_model(rf)
-    # classifier = create_model("rf", n_estimators=100, max_leaf_nodes=100, random_state=42)
-    # print("TOP 3 Classifiers")
-    # for c in top3:
-    #     print(c)
-    # print("----------------------------")
 
-    # classifier = create_model("lightgbm")
-    # classifier = tune_model(classifier, choose_better=True)
-    # classifier = blend_models(top3, weights=[1,1,10])
-    # classifier = top3[0]
+    model = do_network_training(X_train, X_test, y_train, y_test)
 
-    # classifier = create_model("gbc", ccp_alpha=0.0, criterion='friedman_mse', init=None,
-    #                    learning_rate=0.1, loss='deviance', max_depth=3,
-    #                    max_features=None, max_leaf_nodes=None,
-    #                    min_impurity_decrease=0.0, min_impurity_split=None,
-    #                    min_samples_leaf=1, min_samples_split=2,
-    #                    min_weight_fraction_leaf=0.0, n_estimators=100,
-    #                    n_iter_no_change=None, presort='deprecated',
-    #                    random_state=42, subsample=1.0, tol=0.0001,
-    #                    validation_fraction=0.1, warm_start=False, cross_validation=False)  # Optimized elsewhere
-    # classifier = create_model("ridge", cross_validation=False)
-    # classifier = tune_model(classifier, n_iter=100, optimize="Recall")
+    preds = model.predict(X_test).argmax(axis=1)
+    labels = y_test.argmax(axis=1)
 
-    classifier = create_model("lightgbm", )
-    print("Starts with:", classifier)
-    # classifier = tune_model(classifier, n_iter=200, optimize="F1", choose_better=True) # TODO: after many hours, it returned the same initial classifier
-
-    # classifier = create_model("ridge")
-    if verbose >= 0:
-
-        print("Best Model:", classifier)
-        predict_model(classifier)
-        print("Test results:")
-        df_results = pull()
-        for col in df_results.iteritems():
-            print(col[0], ":", col[1].values[0])
-
-    # print(plot_model(classifier, plot='confusion_matrix'))
-    # print(classification_report(y_test, classifier.predict(X_test)))
-
-    #Check primarily results
-    #    print(classification_report(y_test, classifier.predict(X_test)))
-
-    if submission:
-        finalize_model(classifier)  # This should only be used when submitting it to the challenge
+    print("Predictions:", preds)
+    print(classification_report(labels, preds))
+    print(confusion_matrix(labels, preds))
 
     # Save the model.
-    save_challenge_model(model_folder, classes, classifier)
+    save_challenge_model(model_folder, classes, model)
 
     if verbose >= 1:
         print('Done.')
 
+def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_cache=True):
 
-def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_cache=False):
-
-    classes = ['Present', 'Unknown', 'Absent']
-    classifier = model # ['classifier']
     fields = data.split("\n")[0].split(" ")
 
     pid = fields[0]
+    num_locations = int(fields[1])
     frequency_sample_rate = int(fields[2])
+    recording_information = data.split("\n")[1: 1+num_locations]
 
     # Debugging
     # if pid != "85108":
@@ -261,43 +469,38 @@ def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_c
     if use_cache:
         all_patients_embs_df = pd.read_pickle(TEMP_FILE)
         df_input = all_patients_embs_df[all_patients_embs_df["ID"] == str(pid)]
-
+        df_input = df_input[df_input["augmented"] != True]
     else:
-        embs_part, _ = openl3.get_audio_embedding(recordings, [frequency_sample_rate] * len(recordings), hop_size=SECONDS_PER_EMBEDDING, batch_size=4, verbose=1, model=main_model)
 
-        df_input = [ ]
-        for i, part in enumerate(embs_part):
-            df_tmp = pd.DataFrame(part)
-            df_tmp["position"] = i
-            df_input.append(df_tmp)
-        df_input = pd.concat(df_input)
+        df_input = extract_embbeding(recordings, [frequency_sample_rate] * len(recordings), SECONDS_PER_EMBEDDING, num_locations, recording_information, murmur_locations=None)
+        df_input["ID"] = pid
+        for col in ['Unknown', 'Present', 'Absent']:
+            df_input[col] = 0
 
+    test_data = regroup(df_input)
+    X_test = get_numpy(test_data, get_y=False)
+    X_test = tf.convert_to_tensor(X_test, tf.float32)
+    probs = model.predict(X_test)[0]
 
-    df_input = predict_model(classifier, data=df_input)
-    df_input["Label"] = df_input["Label"].apply(lambda x: 1 if x == "True" else 0) # This weird line is meant to convert the strings "True"/"False" into 1/0
-
-    predictions = df_input[["position", "Label"]].groupby("position")["Label"].mean()
-
-    if thresholds is None:
-        thresholds = {"min1": 0.01, "n1": 1, "min2": 0.01, "n2": 1}
-
-    if (predictions >= thresholds["min1"]).sum() >= thresholds["n1"]:
-        labels = [1, 0, 0]
-        if verbose >=0 and "Present" not in data:
-            print("Error marked as Present. Pid:", pid)
-
-    elif (predictions >= thresholds["min2"]).sum() >= thresholds["n2"]:
-        if verbose >=0 and "Present" in data:
-            print("Error marked as Unk. Pid:", pid)
-        labels = [0, 1, 0]
+    pred = np.zeros(3)
+    if probs[1] >= 0.5:
+        pred[1] = 1
+    elif probs[1] > 0.2:
+        pred[2] = 1
     else:
-        if verbose >=0 and "Present" in data:
-            print("Error marked as Absent. Pid:", pid)
-        labels = [0, 0, 1]
+        if df_input["Present"].sum() > 1:
+            print("PID:", pid)
+        pred[0] = 1
 
-    probabilities = labels
-    return classes, labels, probabilities
+    if UNK_OPT == "positive":
+        # probs would have only the labels to "absent", "present". Here we append the prob of 0.0 to unknown
+        # An alternative is assingin the unknown class in case "present" or "absent" is no so strong (i.e., both close to 0.5)
+        if pred[2] != 1:
+            probs = np.append(probs, [0])
+        else:
+            probs = np.append(probs - 0.2, [0.4])
 
+    return classes, pred, list(probs)
 
 ################################################################################
 #
@@ -308,15 +511,20 @@ def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_c
 # Load your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def load_challenge_model(model_folder, verbose):
-    load_config(os.path.join(model_folder, 'config.sav'))
-    return load_model(os.path.join(model_folder, 'model.sav'))
+    from keras.models import load_model
+    return load_model(os.path.join(model_folder, 'keras_model'))
+    # load_config(os.path.join(model_folder, 'config.sav'))
+    # return load_model(os.path.join(model_folder, 'model.sav'))
 
 
 # Save your trained model.
 def save_challenge_model(model_folder, classes, classifier):
-    filename = os.path.join(model_folder, 'model.sav')
-    save_model(classifier, filename)
-    save_config(os.path.join(model_folder, 'config.sav'))
+    classifier.save(os.path.join(model_folder, 'keras_model'))
+
+    # filename = os.path.join(model_folder, 'model.sav')
+    # save_model(classifier, filename)
+    # save_config(os.path.join(model_folder, 'config.sav'))
+
 
 # Extract features from the data.
 def get_features(data, recordings):

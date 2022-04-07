@@ -37,6 +37,9 @@ def evaluate_model(label_folder, output_folder):
     f_measure, f_measure_classes = compute_f_measure(labels, binary_outputs)
     challenge_score = compute_challenge_score(labels, binary_outputs, classes)
 
+    print(classes)
+    print(compute_confusion_matrix(labels, binary_outputs))
+
     # Return the results.
     return classes, auroc, auprc, auroc_classes, auprc_classes, accuracy, f_measure, f_measure_classes, challenge_score
 

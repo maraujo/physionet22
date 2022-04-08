@@ -1,33 +1,8 @@
-scipy<=1.5.4
+numpy==1.21.5
+scipy==1.5.4
+scikit-learn==1.0.2
 joblib==1.1.0
-<<<<<<< HEAD
-<<<<<<< HEAD
-openl3==0.4.1
-pycaret==2.3.4
-numpy>=1.14.5
-pandas<=1.4.1
-lightgbm>=2.3.1
-=======
-=======
->>>>>>> 138735d (merging dewen in master)
 torch==1.11.0
-pandas==1.3.5
+pandas==1.4.1
 tensorflow==2.8.0
 tqdm==4.63.1
-<<<<<<< HEAD
->>>>>>> ad44dd9 (change to download from url)
-=======
-=======
-openl3==0.4.1
-pycaret==2.3.4
-numpy>=1.14.5
-pandas<=1.4.1
-<<<<<<< HEAD
->>>>>>> da293e5 (Implemented a lightgbm version with SMOTE)
-<<<<<<< HEAD
->>>>>>> 138735d (merging dewen in master)
-=======
-=======
-lightgbm>=2.3.1
->>>>>>> c7cee37 (Submission 2 - Tentative 1)
->>>>>>> 6474ecf (tring to merge dewen into master)

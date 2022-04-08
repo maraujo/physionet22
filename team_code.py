@@ -12,10 +12,13 @@ import shutil
 from pathlib import Path
 from helper_code import *
 <<<<<<< HEAD
+<<<<<<< HEAD
 import numpy as np, pandas as pd, scipy as sp, scipy.stats, os, sys, joblib
 import openl3
 
 =======
+=======
+>>>>>>> 138735d (merging dewen in master)
 import numpy as np, scipy as sp, scipy.stats, os, sys, joblib
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestClassifier
@@ -26,7 +29,15 @@ import pandas as pd
 from resnet import ResNet1d
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.model_selection import train_test_split
+<<<<<<< HEAD
 >>>>>>> ad44dd9 (change to download from url)
+=======
+=======
+import numpy as np, pandas as pd, scipy as sp, scipy.stats, os, sys, joblib
+import openl3
+
+>>>>>>> da293e5 (Implemented a lightgbm version with SMOTE)
+>>>>>>> 138735d (merging dewen in master)
 from sklearn.metrics import classification_report
 
 from urllib.error import HTTPError
@@ -43,6 +54,7 @@ from tqdm import tqdm
 # Required functions. Edit these functions to add your code, but do not change the arguments.
 #
 ################################################################################
+<<<<<<< HEAD
 
 from pycaret.classification import create_model, finalize_model, setup, predict_model, pull, save_model
 from pycaret.classification import load_config, save_config, load_model
@@ -133,6 +145,10 @@ def copy_test_data(test_ids, source, dest):
         for f in Path(source).glob(pid + "*"):
             shutil.copyfile(f, os.path.join(dest, os.path.basename(f)))
 
+=======
+<<<<<<< HEAD
+SEQ_LENGTH = 24576
+>>>>>>> 138735d (merging dewen in master)
 
 # Model definition
 def _padding(downsample, kernel_size):
@@ -277,9 +293,101 @@ class ResNet1d(nn.Module):
         # Fully conected layer
         x = self.lin(x)
         return x
+=======
+
+from pycaret.classification import *
+from pycaret.classification import load_config
+
+POS = "position"
+TIME = "time"
+LABEL = "label"
+ID = "ID"
+TEMP_FILE = "/tmp/cache_challege_df.pkl"
+SECONDS_PER_EMBEDDING = 2
+classes = ['Present', 'Unknown', 'Absent']
+num_classes = len(classes)
+main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
+TRAIN_SMALL_SAMPLE = False
+
+def get_embs_df_from_patient_data(num_patient_files, patient_files, data_folder, verbose):
+    patients_embs = []
+    for i in range(num_patient_files):
+        if verbose >= 2:
+            print('    {}/{}...'.format(i+1, num_patient_files))
+
+        if TRAIN_SMALL_SAMPLE and i > 50:
+            break
+
+        # Load the current patient data and recordings.
+        current_patient_data = load_patient_data(patient_files[i])
+        num_locations = get_num_locations(current_patient_data)
+        recording_information = current_patient_data.split('\n')[1:num_locations+1]
+        recordings, frequencies = load_recordings(data_folder, current_patient_data, get_frequencies=True)
+        pid = current_patient_data.split(" ")[0]
+
+        # Debugging:
+        # print("PID:", pid)
+        # if current_patient_data.split(" ")[0] != "45843":
+        #     continue
+
+        # Get where murmur is for this patient
+        patient_data_series = pd.Series(current_patient_data.split('\n')[num_locations+1:])
+        murmur_locations = patient_data_series[patient_data_series.str.contains("Murmur location")].iloc[0].split(": ")[-1]
+        murmur_locations = murmur_locations.split("+")
+
+        #Extract Embeedings
+        embs_part, tss_part = openl3.get_audio_embedding(recordings, frequencies, hop_size=SECONDS_PER_EMBEDDING, batch_size=4, verbose=1, model=main_model)
+
+        #Prepare Features DataFrame
+        record_files = []
+        audios_embs = []
+        for j in range(num_locations):
+            entries = recording_information[j].split(' ')
+            recording_pos = entries[0]
+            # filename = entries[2]
+            # filepath = os.path.join(data_folder, filename)
+            audio_embs_df = pd.DataFrame(embs_part[j])
+            audio_embs_df[POS] = recording_pos
+            audio_embs_df[TIME] = tss_part[j]
+            audio_embs_df["has_murmur"] = recording_pos in murmur_locations
+            audios_embs.append(audio_embs_df)
+
+        audios_embs_df = pd.concat(audios_embs)
+        audios_embs_df = audios_embs_df.reset_index(drop=True)
+
+        # Extract labels and use one-hot encoding.
+        current_labels = np.zeros(num_classes, dtype=int)
+        label = get_label(current_patient_data)
+        if label in classes:
+            j = classes.index(label)
+            current_labels[j] = 1
+
+        audios_embs_df[classes[0]] = current_labels[0]
+        audios_embs_df[classes[1]] = current_labels[1]
+        audios_embs_df[classes[2]] = current_labels[2]
+        audios_embs_df[ID] = pid
+
+        patients_embs.append(audios_embs_df)
+
+    all_patients_embs_df = pd.concat(patients_embs)
+    return all_patients_embs_df
+>>>>>>> da293e5 (Implemented a lightgbm version with SMOTE)
+
+
+def copy_test_data(test_ids, source, dest):
+
+    # Removes everything in the dest folder
+    [f.unlink() for f in Path(dest).glob("*") if f.is_file()]
+
+    # Copies selected files from the source to the dest folder
+    for pid in test_ids:
+        for f in Path(source).glob(pid + "*"):
+            shutil.copyfile(f, os.path.join(dest, os.path.basename(f)))
+
 
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
+<<<<<<< HEAD
 <<<<<<< HEAD
     # main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
 
@@ -414,6 +522,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
 def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_cache=False):
 =======
+=======
+>>>>>>> 138735d (merging dewen in master)
     # download the pretrained model
     download_model_from_url('https://www3.nd.edu/~scl/models/model.pth',model_folder,'model.pth')
     return 0
@@ -511,7 +621,194 @@ def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_c
             all_labels.append(out_argmax[max_0_index].detach().cpu().numpy())
     labels = to_one_hot_bool(min(all_labels), len(classes))
     probabilities = all_probabilities[all_labels.index(min(all_labels))]
+<<<<<<< HEAD
 >>>>>>> ad44dd9 (change to download from url)
+=======
+=======
+    # main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=512)
+
+    # Find data files.
+    if verbose >= 1:
+        print('Finding data files...')
+
+    # Find the patient data files.
+    patient_files = find_patient_files(data_folder)
+    num_patient_files = len(patient_files)
+
+    if num_patient_files == 0:
+        raise Exception('No data was provided.')
+
+    # Create a folder for the model if it does not already exist.
+    os.makedirs(model_folder, exist_ok=True)
+    # Extract the features and labels.
+    if verbose >= 1:
+        print('Extracting features and labels from the Challenge data...')
+
+    if os.path.exists(TEMP_FILE):
+        print(" ----------------------------   Loading TEMP file! ------------------------------------------------")
+        print(TEMP_FILE)
+        all_patients_embs_df = pd.read_pickle(TEMP_FILE)
+    else:
+        all_patients_embs_df = get_embs_df_from_patient_data(num_patient_files, patient_files, data_folder, verbose)
+        try:
+            all_patients_embs_df.to_pickle(TEMP_FILE)
+        except:
+            print("Could not save TEMP file")
+
+    #Stratify Sample
+    all_patients_embs_df = all_patients_embs_df.reset_index(drop=True)
+    ######
+    print("Running Pycaret:")
+
+    # What should we do with Unknown (?)
+    UNK_OPT = "positive"
+
+    if UNK_OPT == "positive":
+        all_patients_embs_df.loc[all_patients_embs_df["Unknown"] == True, "has_murmur"] = True   # We could assume that unknown is positive label
+    elif UNK_OPT == "remove":
+        all_patients_embs_df = all_patients_embs_df[all_patients_embs_df["Unknown"] != True]  # Or we could just drop these instances
+    else:
+        pass
+
+    features_to_ignore = ["Present", "Unknown", "Absent", "ID", "time", "position", "has_murmur"]
+    all_patients_embs_df["label"] = all_patients_embs_df["has_murmur"]
+
+    seed = 42
+    np.random.seed(seed)
+
+    pids = all_patients_embs_df["ID"].unique()
+    np.random.shuffle(pids)
+
+    train_ids = set(pids[:int(pids.shape[0]*.8)])
+    test_ids = set(pids) - train_ids
+
+    train_data = all_patients_embs_df[all_patients_embs_df["ID"].isin(train_ids)]
+    test_data = all_patients_embs_df[all_patients_embs_df["ID"].isin(test_ids)]
+
+    exp = setup(data=train_data, test_data=test_data,
+                target='label', ignore_features=features_to_ignore, silent=True,
+                remove_perfect_collinearity=True,
+                normalize=True, normalize_method="robust",
+                fix_imbalance=True,
+                fold_strategy="groupkfold", fold_groups="ID",
+                use_gpu=False, session_id=seed)
+
+    if not submission:
+        copy_test_data(test_ids, "/home/palotti/github/physionet22/all_training_data/", "/home/palotti/github/physionet22/test_data/")
+
+    # top3 = compare_models(include=["et", "rf", "lda", "lr", "ridge", "lightgbm", "gbc", "xgboost"],  n_select=3)
+    # top3 = compare_models(include=["lda", "lr", "ridge", "lightgbm", "dummy"], n_select=3, sort='F1')
+    # top3 = compare_models(include=["et", "rf", "lda", "lr", "ridge", "lightgbm"], n_select=3)
+    # classifier = compare_models(include=["rf"], n_select=1)
+
+    # rf = RandomForestClassifier(n_estimators=100, max_leaf_nodes=100, random_state=42,)
+    # classifier = create_model(rf)
+    # classifier = create_model("rf", n_estimators=100, max_leaf_nodes=100, random_state=42)
+    # print("TOP 3 Classifiers")
+    # for c in top3:
+    #     print(c)
+    # print("----------------------------")
+
+    # classifier = create_model("lightgbm")
+    # classifier = tune_model(classifier, choose_better=True)
+    # classifier = blend_models(top3, weights=[1,1,10])
+    # classifier = top3[0]
+
+    # classifier = create_model("gbc", ccp_alpha=0.0, criterion='friedman_mse', init=None,
+    #                    learning_rate=0.1, loss='deviance', max_depth=3,
+    #                    max_features=None, max_leaf_nodes=None,
+    #                    min_impurity_decrease=0.0, min_impurity_split=None,
+    #                    min_samples_leaf=1, min_samples_split=2,
+    #                    min_weight_fraction_leaf=0.0, n_estimators=100,
+    #                    n_iter_no_change=None, presort='deprecated',
+    #                    random_state=42, subsample=1.0, tol=0.0001,
+    #                    validation_fraction=0.1, warm_start=False, cross_validation=False)  # Optimized elsewhere
+    # classifier = create_model("ridge", cross_validation=False)
+    # classifier = tune_model(classifier, n_iter=100, optimize="Recall")
+
+    classifier = create_model("lightgbm")
+    print("Starts with:", classifier)
+    # classifier = tune_model(classifier, n_iter=200, optimize="F1", choose_better=True) # TODO: after many hours, it returned the same initial classifier
+
+    # classifier = create_model("ridge")
+    if verbose >= 0:
+
+        print("Best Model:", classifier)
+        predict_model(classifier)
+        print("Test results:")
+        df_results = pull()
+        for col in df_results.iteritems():
+            print(col[0], ":", col[1].values[0])
+
+    # print(plot_model(classifier, plot='confusion_matrix'))
+    # print(classification_report(y_test, classifier.predict(X_test)))
+
+    #Check primarily results
+    #    print(classification_report(y_test, classifier.predict(X_test)))
+
+    if submission:
+        finalize_model(classifier)  # This should only be used when submitting it to the challenge
+
+    # Save the model.
+    save_challenge_model(model_folder, classes, classifier)
+
+    if verbose >= 1:
+        print('Done.')
+
+
+def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_cache=False):
+
+    classes = ['Present', 'Unknown', 'Absent']
+    classifier = model # ['classifier']
+    fields = data.split("\n")[0].split(" ")
+
+    pid = fields[0]
+    frequency_sample_rate = int(fields[2])
+
+    # Debugging
+    # if pid != "85108":
+    #     return classes,  [1,0,0],  [1,0,0]
+
+    if use_cache:
+        all_patients_embs_df = pd.read_pickle(TEMP_FILE)
+        df_input = all_patients_embs_df[all_patients_embs_df["ID"] == str(pid)]
+
+    else:
+        embs_part, _ = openl3.get_audio_embedding(recordings, [frequency_sample_rate] * len(recordings), hop_size=SECONDS_PER_EMBEDDING, batch_size=4, verbose=1, model=main_model)
+
+        df_input = [ ]
+        for i, part in enumerate(embs_part):
+            df_tmp = pd.DataFrame(part)
+            df_tmp["position"] = i
+            df_input.append(df_tmp)
+        df_input = pd.concat(df_input)
+
+
+    df_input = predict_model(classifier, data=df_input)
+    df_input["Label"] = df_input["Label"].apply(lambda x: 1 if x == "True" else 0) # This weird line is meant to convert the strings "True"/"False" into 1/0
+
+    predictions = df_input[["position", "Label"]].groupby("position")["Label"].mean()
+
+    if thresholds is None:
+        thresholds = {"min1": 0.01, "n1": 1, "min2": 0.01, "n2": 1}
+
+    if (predictions >= thresholds["min1"]).sum() >= thresholds["n1"]:
+        labels = [1, 0, 0]
+        if verbose >=0 and "Present" not in data:
+            print("Error marked as Present. Pid:", pid)
+
+    elif (predictions >= thresholds["min2"]).sum() >= thresholds["n2"]:
+        if verbose >=0 and "Present" in data:
+            print("Error marked as Unk. Pid:", pid)
+        labels = [0, 1, 0]
+    else:
+        if verbose >=0 and "Present" in data:
+            print("Error marked as Absent. Pid:", pid)
+        labels = [0, 0, 1]
+
+    probabilities = labels
+>>>>>>> da293e5 (Implemented a lightgbm version with SMOTE)
+>>>>>>> 138735d (merging dewen in master)
     return classes, labels, probabilities
 
 

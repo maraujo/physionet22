@@ -14,7 +14,7 @@ from helper_code import *
 from team_code import load_challenge_model, run_challenge_model
 
 # Run model.
-def run_model(model_folder, data_folder, output_folder, allow_failures, verbose):
+def run_model(model_folder, data_folder, output_folder, allow_failures, verbose, thresholds):
     # Load models.
     if verbose >= 1:
         print('Loading Challenge model...')
@@ -45,7 +45,7 @@ def run_model(model_folder, data_folder, output_folder, allow_failures, verbose)
 
         # Allow or disallow the model to fail on parts of the data; helpful for debugging.
         try:
-            classes, labels, probabilities = run_challenge_model(model, patient_data, recordings, verbose) ### Teams: Implement this function!!!
+            classes, labels, probabilities = run_challenge_model(model, patient_data, recordings, verbose, thresholds) ### Teams: Implement this function!!!
         except:
             if allow_failures:
                 if verbose >= 2:
@@ -82,5 +82,23 @@ if __name__ == '__main__':
         verbose = int(sys.argv[4])
     else:
         verbose = 1
+    thresholds = None
 
-    run_model(model_folder, data_folder, output_folder, allow_failures, verbose)
+    run_model(model_folder, data_folder, output_folder, allow_failures, verbose, thresholds)
+
+# Our RF baseline submission (using run_challenge_model created by matheus)
+# ['Present', 'Unknown', 'Absent']
+# [[ 35.  14. 126.]
+#  [  0.   0.   0.]
+#  [  0.   0.  14.]]
+# AUROC,AUPRC,Accuracy,F-measure,Challenge
+# 0.546,0.351,0.259,0.172,491.741
+
+#AUROC,AUPRC,Accuracy,F-measure,Challenge (using run_challenge_model created by me on same RF model)
+
+
+# RidgeClassifier
+# ['Present', 'Unknown', 'Absent']
+# [[ 34.  12. 124.]
+#  [  0.   0.   0.]
+#  [  1.   2.  16.]]

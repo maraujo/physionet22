@@ -5,7 +5,7 @@ commits = ["a9827a4dbed3793a5cd32112708b7786d951b159", "14cbe8e6b381147622e8f313
 N_FOLDERS = 10
 results = []
 for commit in commits:
-    os.system("git checkout {}".format(commit))
+    os.system("git checkout -f {}".format(commit))
     os.system("git status")
     os.system("cp ../evaluate_model.py ./")
     os.system("cp ../test_in_docker.bash ./")

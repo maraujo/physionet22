@@ -34,7 +34,7 @@ if __name__ == "__main__":
             "label" : patient_label 
         })
     patient_info_df = pd.DataFrame(patient_infos)
-
+    
     print("Training Set")
     print("Number of patients : ", patient_info_df.iloc[0])
     print(patient_info_df["label"].value_counts())
@@ -44,8 +44,8 @@ if __name__ == "__main__":
 
     for train, test in cv.split(patient_info_df):
         print("Folder Number: {}".format(folder_num))
-        train_df = patient_info_df.loc[train]
-        test_df = patient_info_df.loc[test]
+        train_df = patient_info_df.iloc[train]
+        test_df = patient_info_df.iloc[test]
         
         #Create folder and copy train files
         print("Copying train.")

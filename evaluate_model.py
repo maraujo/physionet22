@@ -325,7 +325,7 @@ def compute_challenge_score(labels, outputs, classes):
 
 if __name__ == '__main__':
     classes, auroc, auprc, auroc_classes, auprc_classes, accuracy, f_measure, f_measure_classes, challenge_score, tn, fp, fn, tp, sensitivity, specificity = evaluate_model(sys.argv[1], sys.argv[2])
-    output_string = 'AUROC,AUPRC,Accuracy,F-measure,TP,TN,FP,FN,Sensitivity,Specificity,Challenge, tn, fp, fn, tp, sensitivity, specificity\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}'.format(auroc, auprc, accuracy, f_measure, challenge_score, tn, fp, fn, tp, sensitivity, specificity)
+    output_string = 'AUROC,AUPRC,Accuracy,F-measure,Challenge, tn, fp, fn, tp, sensitivity, specificity\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}'.format(auroc, auprc, accuracy, f_measure, challenge_score, tn, fp, fn, tp, sensitivity, specificity)
     class_output_string = 'Classes,{}\nAUROC,{}\nAUPRC,{}\nF-measure,{}'.format(
         ','.join(classes),
         ','.join('{:.3f}'.format(x) for x in auroc_classes),

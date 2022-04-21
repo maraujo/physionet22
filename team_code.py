@@ -9,12 +9,9 @@
 #
 ################################################################################
 
-
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-import seaborn as sns
 
 from sklearn import metrics
 from sklearn.metrics import accuracy_score, precision_score, recall_score, classification_report, confusion_matrix

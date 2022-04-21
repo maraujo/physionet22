@@ -16,6 +16,7 @@
 
 import os, os.path, sys, numpy as np
 from helper_code import load_patient_data, get_label, load_challenge_outputs, compare_strings
+import sklearn
 
 # Evaluate the model.
 def evaluate_model(label_folder, output_folder):
@@ -39,9 +40,12 @@ def evaluate_model(label_folder, output_folder):
 
     print(classes)
     print(compute_confusion_matrix(labels, binary_outputs))
+    tn, fp, fn, tp = sklearn.metrics.confusion_matrix(labels, binary_outputs).ravel()
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (tn + fp)
 
     # Return the results.
-    return classes, auroc, auprc, auroc_classes, auprc_classes, accuracy, f_measure, f_measure_classes, challenge_score
+    return classes, auroc, auprc, auroc_classes, auprc_classes, accuracy, f_measure, f_measure_classes, challenge_score, tn, fp, fn, tp, sensitivity, specificity
 
 # Find Challenge files.
 def find_challenge_files(label_folder, output_folder):
@@ -320,8 +324,8 @@ def compute_challenge_score(labels, outputs, classes):
     return mean_score
 
 if __name__ == '__main__':
-    classes, auroc, auprc, auroc_classes, auprc_classes, accuracy, f_measure, f_measure_classes, challenge_score = evaluate_model(sys.argv[1], sys.argv[2])
-    output_string = 'AUROC,AUPRC,Accuracy,F-measure,Challenge\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}'.format(auroc, auprc, accuracy, f_measure, challenge_score)
+    classes, auroc, auprc, auroc_classes, auprc_classes, accuracy, f_measure, f_measure_classes, challenge_score, tn, fp, fn, tp, sensitivity, specificity = evaluate_model(sys.argv[1], sys.argv[2])
+    output_string = 'AUROC,AUPRC,Accuracy,F-measure,TP,TN,FP,FN,Sensitivity,Specificity,Challenge, tn, fp, fn, tp, sensitivity, specificity\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}'.format(auroc, auprc, accuracy, f_measure, challenge_score, tn, fp, fn, tp, sensitivity, specificity)
     class_output_string = 'Classes,{}\nAUROC,{}\nAUPRC,{}\nF-measure,{}'.format(
         ','.join(classes),
         ','.join('{:.3f}'.format(x) for x in auroc_classes),

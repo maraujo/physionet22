@@ -16,7 +16,7 @@
 
 import os, os.path, sys, numpy as np
 from helper_code import load_patient_data, get_label, load_challenge_outputs, compare_strings
-import sklearn
+from sklearn.metrics import confusion_matrix
 
 # Evaluate the model.
 def evaluate_model(label_folder, output_folder):
@@ -40,7 +40,7 @@ def evaluate_model(label_folder, output_folder):
 
     print(classes)
     print(compute_confusion_matrix(labels, binary_outputs))
-    tn, fp, fn, tp = sklearn.metrics.confusion_matrix(labels, binary_outputs).ravel()
+    tn, fp, fn, tp = confusion_matrix(labels[:,0], binary_outputs[:,0]).ravel()
     sensitivity = tp / (tp + fn)
     specificity = tn / (tn + fp)
 

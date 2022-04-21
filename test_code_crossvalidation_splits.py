@@ -6,6 +6,7 @@ N_FOLDERS = 10
 results = []
 for commit in commits:
     os.system("git checkout {}".format(commit))
+    os.system("git status")
     os.system("cp ../evaluate_model.py ./")
     os.system("cp ../test_in_docker.bash ./")
     os.system("docker build -t image .")

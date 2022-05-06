@@ -40,7 +40,7 @@ from tqdm import tqdm
 SEQ_LENGTH = 24576
 # DEVICE = 'cpu'
 DEVICE = 'cuda:0'
-EPOCHS = 100
+EPOCHS = 160
 
 # Model definition
 def _padding(downsample, kernel_size):
@@ -367,7 +367,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     class_weights = torch.Tensor([5.0,1.0,1.0]).to(DEVICE)
     criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), 1e-4, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[50], gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[80], gamma=0.1)
     # define dataloader
     train_dataset = physionet22_dataset(data_dir=train_data_dir, recording_length=SEQ_LENGTH)
     train_dataloader = torch.utils.data.DataLoader(train_dataset,

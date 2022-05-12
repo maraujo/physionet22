@@ -115,7 +115,7 @@ def get_embs_df_from_patient_data_long(num_patient_files, patient_files, data_fo
 
         # Extract labels and use one-hot encoding.
         current_labels = np.zeros(len(classes), dtype=int)
-        label = get_label(current_patient_data)
+        label = get_murmur(current_patient_data)
         audios_embs_df["augmented"] = False
         audios_embs_df["seconds"] = SECONDS_PER_EMBEDDING
 

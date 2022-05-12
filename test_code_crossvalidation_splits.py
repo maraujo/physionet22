@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-commits = ["da75c13618892a469a8cdda3c1c54271950fbb3f"]
+commits = ["e288ff0e6d55935c3b2a3679f97205f3ecf75650"]
 #Run image against crossvalidation
 N_FOLDERS = 10
 results = []

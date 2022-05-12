@@ -1,4 +1,4 @@
-FROM python:3.7.13-buster
+FROM python:3.8.12-buster
 
 ## The MAINTAINER instruction sets the author field of the generated images.
 MAINTAINER limadim@ccf.org

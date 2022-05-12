@@ -448,7 +448,7 @@ def train_challenge_model(data_folder, model_folder, verbose, submission=False):
     if verbose >= 1:
         print('Extracting features and labels from the Challenge data...')
 
-    if os.path.exists(TEMP_FILE):
+    if os.path.exists(TEMP_FILE) and False:
         print(" ----------------------------   Loading TEMP file! ------------------------------------------------")
         print(TEMP_FILE)
         all_patients_embs_df = pd.read_pickle(TEMP_FILE)

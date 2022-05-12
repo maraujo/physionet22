@@ -1,14 +1,14 @@
 # This scripts create N_FOLDERS of physionet22 data using symbolic links.
 from sklearn.model_selection import ShuffleSplit
-from helper_code import find_patient_files, load_patient_data, get_label, get_patient_id
+from helper_code import find_patient_files, load_patient_data, get_murmur, get_patient_id
 import pandas as pd
 from pathlib import Path
 from glob import glob
 import shutil
 
 N_FOLDERS = 10
-INPUT_FOLDER = "/physionet_data/challenge/files/circor-heart-sound/1.0.1/training_data/"
-OUTPUT_FOLDER = "/physionet_data/challenge/files/cross-validation-data/"
+INPUT_FOLDER = "/physionet_data/challenge/files/circor-heart-sound/1.0.3/training_data/"
+OUTPUT_FOLDER = "/physionet_data/challenge/files/cross-validation-data-1-0-3-mini/"
 seed = 42
     
 def create_folder_and_move(patient_infos, dst_folder):
@@ -27,13 +27,13 @@ if __name__ == "__main__":
     for patient_file in patients_files:
         patient_data = load_patient_data(patient_file)
         patient_id = get_patient_id(patient_data)
-        patient_label = get_label(patient_data)
+        patient_label = get_murmur(patient_data)
         print(patient_id)
         patient_infos.append({
             "id" : patient_id,
             "label" : patient_label 
         })
-    patient_info_df = pd.DataFrame(patient_infos)
+    patient_info_df = pd.DataFrame(patient_infos).sample(5)
     
     print("Training Set")
     print("Number of patients : ", patient_info_df.iloc[0])

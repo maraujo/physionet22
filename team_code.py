@@ -21,6 +21,7 @@ from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.models import Model
 from sklearn import preprocessing
 import tensorflow_addons as tfa
+import openl3
 
 
 from sklearn.metrics import classification_report
@@ -33,6 +34,8 @@ import hashlib
 import shutil
 import tempfile
 from tqdm import tqdm
+from helper_code import *
+from pathlib import Path
 
 ################################################################################
 #
@@ -54,6 +57,7 @@ UNK_OPT = "positive"
 EMBEDDING_SIZE = 512
 main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=EMBEDDING_SIZE)
 TRAIN_SMALL_SAMPLE = False
+
 
 def extract_embbeding(recordings, frequencies, hop_size, num_locations, recording_information, murmur_locations):
 
@@ -527,7 +531,7 @@ def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_c
     # if pid != "85108":
     #     return classes,  [1,0,0],  [1,0,0]
 
-    if use_cache:
+    if use_cache and False:
         all_patients_embs_df = pd.read_pickle(TEMP_FILE)
         df_input = all_patients_embs_df[all_patients_embs_df["ID"] == str(pid)]
         df_input = df_input[df_input["augmented"] != True]
@@ -541,6 +545,8 @@ def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_c
     test_data = regroup(df_input)
     X_test = get_numpy(test_data, get_y=False)
     X_test = tf.convert_to_tensor(X_test, tf.float32)
+    
+    
     probs = model.predict(X_test)[0]
 
     pred = np.zeros(3)

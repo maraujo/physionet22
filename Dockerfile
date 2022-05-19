@@ -1,4 +1,4 @@
-FROM python:3.8.12-buster
+FROM python:3.7.13-buster
 
 ## The MAINTAINER instruction sets the author field of the generated images.
 MAINTAINER limadim@ccf.org
@@ -15,5 +15,4 @@ WORKDIR /physionet
 ## Install your dependencies here using apt install, etc.
 
 ## Include the following line if you have a requirements.txt file.
-RUN pip install -U pip
 RUN pip install -r requirements.txt

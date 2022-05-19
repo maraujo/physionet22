@@ -1,31 +1,23 @@
-#!/usr/bin/env python
-
-# Edit this script to add your team's code. Some functions are *required*, but you can edit most parts of the required functions,
-# change or remove non-required functions, and add your own functions.
-
-################################################################################
-#
-# Import libraries and functions. You can change or remove them.
-#
-################################################################################
-
+"""
+Code copied from https://github.com/antonior92/ecg-age-prediction/blob/main/resnet.py
+"""
+import torch
+import torch.nn as nn
 import numpy as np
+
+from helper_code import *
+import numpy as np, scipy as sp, scipy.stats, os, sys, joblib
+from sklearn.impute import SimpleImputer
+from sklearn.ensemble import RandomForestClassifier
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import pandas as pd
-import tensorflow as tf
-
-from sklearn import metrics
-from sklearn.metrics import accuracy_score, precision_score, recall_score, classification_report, confusion_matrix
+from evaluate_model import *
+from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.model_selection import train_test_split
-from tensorflow.keras import layers, losses
-from tensorflow.keras.utils import to_categorical
-from tensorflow.keras.models import Model
-from sklearn import preprocessing
-import tensorflow_addons as tfa
-import openl3
-
-
 from sklearn.metrics import classification_report
-
+from torch.utils.data.dataset import Dataset
 from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse 
@@ -34,540 +26,580 @@ import hashlib
 import shutil
 import tempfile
 from tqdm import tqdm
-from helper_code import *
-from pathlib import Path
+
+def _padding(downsample, kernel_size):
+    """Compute required padding"""
+    padding = max(0, int(np.floor((kernel_size - downsample + 1) / 2)))
+    return padding
+
+
+def _downsample(n_samples_in, n_samples_out):
+    """Compute downsample rate"""
+    downsample = int(n_samples_in // n_samples_out)
+    if downsample < 1:
+        raise ValueError("Number of samples should always decrease")
+    if n_samples_in % n_samples_out != 0:
+        raise ValueError("Number of samples for two consecutive blocks "
+                         "should always decrease by an integer factor.")
+    return downsample
+
+
+class ResBlock1d(nn.Module):
+    """Residual network unit for unidimensional signals."""
+
+    def __init__(self, n_filters_in, n_filters_out, downsample, kernel_size, dropout_rate):
+        if kernel_size % 2 == 0:
+            raise ValueError("The current implementation only support odd values for `kernel_size`.")
+        super(ResBlock1d, self).__init__()
+        # Forward path
+        padding = _padding(1, kernel_size)
+        self.conv1 = nn.Conv1d(n_filters_in, n_filters_out, kernel_size, padding=padding, bias=False)
+        self.bn1 = nn.BatchNorm1d(n_filters_out)
+        self.relu = nn.ReLU()
+        self.dropout1 = nn.Dropout(dropout_rate)
+        padding = _padding(downsample, kernel_size)
+        self.conv2 = nn.Conv1d(n_filters_out, n_filters_out, kernel_size,
+                               stride=downsample, padding=padding, bias=False)
+        self.bn2 = nn.BatchNorm1d(n_filters_out)
+        self.dropout2 = nn.Dropout(dropout_rate)
+
+        # Skip connection
+        skip_connection_layers = []
+        # Deal with downsampling
+        if downsample > 1:
+            maxpool = nn.MaxPool1d(downsample, stride=downsample)
+            skip_connection_layers += [maxpool]
+        # Deal with n_filters dimension increase
+        if n_filters_in != n_filters_out:
+            conv1x1 = nn.Conv1d(n_filters_in, n_filters_out, 1, bias=False)
+            skip_connection_layers += [conv1x1]
+        # Build skip conection layer
+        if skip_connection_layers:
+            self.skip_connection = nn.Sequential(*skip_connection_layers)
+        else:
+            self.skip_connection = None
+
+    def forward(self, x, y):
+        """Residual unit."""
+        if self.skip_connection is not None:
+            y = self.skip_connection(y)
+        else:
+            y = y
+        # 1st layer
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.dropout1(x)
+
+        # 2nd layer
+        x = self.conv2(x)
+        x += y  # Sum skip connection and main connection
+        y = x
+        x = self.bn2(x)
+        x = self.relu(x)
+        x = self.dropout2(x)
+        return x, y
+
+
+class ResNet1d(nn.Module):
+    """Residual network for unidimensional signals.
+    Parameters
+    ----------
+    input_dim : tuple
+        Input dimensions. Tuple containing dimensions for the neural network
+        input tensor. Should be like: ``(n_filters, n_samples)``.
+    blocks_dim : list of tuples
+        Dimensions of residual blocks.  The i-th tuple should contain the dimensions
+        of the output (i-1)-th residual block and the input to the i-th residual
+        block. Each tuple shoud be like: ``(n_filters, n_samples)``. `n_samples`
+        for two consecutive samples should always decrease by an integer factor.
+    dropout_rate: float [0, 1), optional
+        Dropout rate used in all Dropout layers. Default is 0.8
+    kernel_size: int, optional
+        Kernel size for convolutional layers. The current implementation
+        only supports odd kernel sizes. Default is 17.
+    References
+    ----------
+    .. [1] K. He, X. Zhang, S. Ren, and J. Sun, "Identity Mappings in Deep Residual Networks,"
+           arXiv:1603.05027, Mar. 2016. https://arxiv.org/pdf/1603.05027.pdf.
+    .. [2] K. He, X. Zhang, S. Ren, and J. Sun, "Deep Residual Learning for Image Recognition," in 2016 IEEE Conference
+           on Computer Vision and Pattern Recognition (CVPR), 2016, pp. 770-778. https://arxiv.org/pdf/1512.03385.pdf
+    """
+
+    def __init__(self, input_dim, blocks_dim, n_classes, kernel_size=17, dropout_rate=0.8):
+        super(ResNet1d, self).__init__()
+        # First layers
+        n_filters_in, n_filters_out = input_dim[0], blocks_dim[0][0]
+        n_samples_in, n_samples_out = input_dim[1], blocks_dim[0][1]
+        downsample = _downsample(n_samples_in, n_samples_out)
+        padding = _padding(downsample, kernel_size)
+        self.conv1 = nn.Conv1d(n_filters_in, n_filters_out, kernel_size, bias=False,
+                               stride=downsample, padding=padding)
+        self.bn1 = nn.BatchNorm1d(n_filters_out)
+
+        # Residual block layers
+        self.res_blocks = []
+        for i, (n_filters, n_samples) in enumerate(blocks_dim):
+            n_filters_in, n_filters_out = n_filters_out, n_filters
+            n_samples_in, n_samples_out = n_samples_out, n_samples
+            downsample = _downsample(n_samples_in, n_samples_out)
+            resblk1d = ResBlock1d(n_filters_in, n_filters_out, downsample, kernel_size, dropout_rate)
+            self.add_module('resblock1d_{0}'.format(i), resblk1d)
+            self.res_blocks += [resblk1d]
+
+        # Linear layer
+        n_filters_last, n_samples_last = blocks_dim[-1]
+        last_layer_dim = n_filters_last * n_samples_last
+        self.lin = nn.Linear(last_layer_dim, n_classes)
+        self.n_blk = len(blocks_dim)
+
+    def forward(self, x):
+        """Implement ResNet1d forward propagation"""
+        # First layers
+        x = self.conv1(x)
+        x = self.bn1(x)
+
+        # Residual blocks
+        y = x
+        for blk in self.res_blocks:
+            x, y = blk(x, y)
+
+        # Flatten array
+        x = x.view(x.size(0), -1)
+
+        # Fully conected layer
+        x = self.lin(x)
+        return x
+
+
 
 ################################################################################
 #
 # Required functions. Edit these functions to add your code, but do not change the arguments.
 #
 ################################################################################
+SEQ_LENGTH = 24576
+DEVICE = 'cpu'
+# DEVICE = 'cuda:0'
+EPOCHS = 5
+# EPOCHS = 160
 
-POS = "position"
-TIME = "time"
-TIME_COUNTER = "time_counter"
-LABEL = "label"
-ID = "ID"
-NAVALUE = -1
-#TEMP_FILE = "/tmp/cache_challege_df.pkl"
-TEMP_FILE = "./cache_challege_df_long_extra_2d.pkl"
-SECONDS_PER_EMBEDDING = 2
-classes = ['Absent', 'Present', 'Unknown']  # Do not change the order
-UNK_OPT = "positive"
-EMBEDDING_SIZE = 512
-main_model = openl3.models.load_audio_embedding_model(input_repr="mel256", content_type="music",  embedding_size=EMBEDDING_SIZE)
-TRAIN_SMALL_SAMPLE = False
+# Model definition
+def _padding(downsample, kernel_size):
+    """Compute required padding"""
+    padding = max(0, int(np.floor((kernel_size - downsample + 1) / 2)))
+    return padding
 
+def _downsample(n_samples_in, n_samples_out):
+    """Compute downsample rate"""
+    downsample = int(n_samples_in // n_samples_out)
+    if downsample < 1:
+        raise ValueError("Number of samples should always decrease")
+    if n_samples_in % n_samples_out != 0:
+        raise ValueError("Number of samples for two consecutive blocks "
+                         "should always decrease by an integer factor.")
+    return downsample
 
-def extract_embbeding(recordings, frequencies, hop_size, num_locations, recording_information, murmur_locations):
+class ResBlock1d(nn.Module):
+    """Residual network unit for unidimensional signals."""
 
-    # Extract Embeedings
-    embs_part, tss_part = openl3.get_audio_embedding(recordings, frequencies, hop_size=hop_size,
-                                                     batch_size=4, verbose=1, model=main_model)
+    def __init__(self, n_filters_in, n_filters_out, downsample, kernel_size, dropout_rate):
+        if kernel_size % 2 == 0:
+            raise ValueError("The current implementation only support odd values for `kernel_size`.")
+        super(ResBlock1d, self).__init__()
+        # Forward path
+        padding = _padding(1, kernel_size)
+        self.conv1 = nn.Conv1d(n_filters_in, n_filters_out, kernel_size, padding=padding, bias=False)
+        self.bn1 = nn.BatchNorm1d(n_filters_out)
+        self.relu = nn.ReLU()
+        self.dropout1 = nn.Dropout(dropout_rate)
+        padding = _padding(downsample, kernel_size)
+        self.conv2 = nn.Conv1d(n_filters_out, n_filters_out, kernel_size,
+                               stride=downsample, padding=padding, bias=False)
+        self.bn2 = nn.BatchNorm1d(n_filters_out)
+        self.dropout2 = nn.Dropout(dropout_rate)
 
-    # Prepare Features DataFrame
-    audios_embs = []
-    for j in range(num_locations):
-        entries = recording_information[j].split(' ')
-        recording_pos = entries[0]
-        # audio_embs_df = pd.DataFrame(embs_part[j].reshape(-1))
-        # audio_embs_df = audio_embs_df.transpose()
+        # Skip connection
+        skip_connection_layers = []
+        # Deal with downsampling
+        if downsample > 1:
+            maxpool = nn.MaxPool1d(downsample, stride=downsample)
+            skip_connection_layers += [maxpool]
+        # Deal with n_filters dimension increase
+        if n_filters_in != n_filters_out:
+            conv1x1 = nn.Conv1d(n_filters_in, n_filters_out, 1, bias=False)
+            skip_connection_layers += [conv1x1]
+        # Build skip conection layer
+        if skip_connection_layers:
+            self.skip_connection = nn.Sequential(*skip_connection_layers)
+        else:
+            self.skip_connection = None
 
-        audio_embs_df = pd.DataFrame(embs_part[j])
-        audio_embs_df[POS] = recording_pos
-        audio_embs_df[TIME] = tss_part[j]
-        audio_embs_df[TIME_COUNTER] = range(len(tss_part[j]))
-        if murmur_locations:
-            audio_embs_df["has_murmur"] = recording_pos in murmur_locations
-        audios_embs.append(audio_embs_df)
+    def forward(self, x, y):
+        """Residual unit."""
+        if self.skip_connection is not None:
+            y = self.skip_connection(y)
+        else:
+            y = y
+        # 1st layer
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.dropout1(x)
 
-    audios_embs_df = pd.concat(audios_embs)
-    return audios_embs_df.reset_index(drop=True)
+        # 2nd layer
+        x = self.conv2(x)
+        x += y  # Sum skip connection and main connection
+        y = x
+        x = self.bn2(x)
+        x = self.relu(x)
+        x = self.dropout2(x)
+        return x, y
 
+class ResNet1d(nn.Module):
+    """Residual network for unidimensional signals.
+    Parameters
+    ----------
+    input_dim : tuple
+        Input dimensions. Tuple containing dimensions for the neural network
+        input tensor. Should be like: ``(n_filters, n_samples)``.
+    blocks_dim : list of tuples
+        Dimensions of residual blocks.  The i-th tuple should contain the dimensions
+        of the output (i-1)-th residual block and the input to the i-th residual
+        block. Each tuple shoud be like: ``(n_filters, n_samples)``. `n_samples`
+        for two consecutive samples should always decrease by an integer factor.
+    dropout_rate: float [0, 1), optional
+        Dropout rate used in all Dropout layers. Default is 0.8
+    kernel_size: int, optional
+        Kernel size for convolutional layers. The current implementation
+        only supports odd kernel sizes. Default is 17.
+    References
+    ----------
+    .. [1] K. He, X. Zhang, S. Ren, and J. Sun, "Identity Mappings in Deep Residual Networks,"
+           arXiv:1603.05027, Mar. 2016. https://arxiv.org/pdf/1603.05027.pdf.
+    .. [2] K. He, X. Zhang, S. Ren, and J. Sun, "Deep Residual Learning for Image Recognition," in 2016 IEEE Conference
+           on Computer Vision and Pattern Recognition (CVPR), 2016, pp. 770-778. https://arxiv.org/pdf/1512.03385.pdf
+    """
 
-def get_embs_df_from_patient_data_long(num_patient_files, patient_files, data_folder, verbose):
-    patients_embs = []
-    for i in range(num_patient_files):
-        if verbose >= 2:
-            print('    {}/{}...'.format(i+1, num_patient_files))
+    def __init__(self, input_dim, blocks_dim, n_classes, kernel_size=17, dropout_rate=0.8):
+        super(ResNet1d, self).__init__()
+        # First layers
+        n_filters_in, n_filters_out = input_dim[0], blocks_dim[0][0]
+        n_samples_in, n_samples_out = input_dim[1], blocks_dim[0][1]
+        downsample = _downsample(n_samples_in, n_samples_out)
+        padding = _padding(downsample, kernel_size)
+        self.conv1 = nn.Conv1d(n_filters_in, n_filters_out, kernel_size, bias=False,
+                               stride=downsample, padding=padding)
+        self.bn1 = nn.BatchNorm1d(n_filters_out)
 
-        if TRAIN_SMALL_SAMPLE and i > 50:
-            break
+        # Residual block layers
+        self.res_blocks = []
+        for i, (n_filters, n_samples) in enumerate(blocks_dim):
+            n_filters_in, n_filters_out = n_filters_out, n_filters
+            n_samples_in, n_samples_out = n_samples_out, n_samples
+            downsample = _downsample(n_samples_in, n_samples_out)
+            resblk1d = ResBlock1d(n_filters_in, n_filters_out, downsample, kernel_size, dropout_rate)
+            self.add_module('resblock1d_{0}'.format(i), resblk1d)
+            self.res_blocks += [resblk1d]
 
-        # Load the current patient data and recordings.
-        current_patient_data = load_patient_data(patient_files[i])
-        num_locations = get_num_locations(current_patient_data)
-        recording_information = current_patient_data.split('\n')[1:num_locations+1]
-        recordings, frequencies = load_recordings(data_folder, current_patient_data, get_frequencies=True)
-        pid = current_patient_data.split(" ")[0]
+        # Linear layer
+        n_filters_last, n_samples_last = blocks_dim[-1]
+        last_layer_dim = n_filters_last * n_samples_last
+        self.identity = nn.Identity()
+        self.avgpool = nn.AdaptiveAvgPool1d(1)
+        # self.lin = nn.Linear(last_layer_dim, n_classes)
+        self.lin = nn.Linear(n_filters_last, n_classes)
+        self.n_blk = len(blocks_dim)
 
-        # Debugging:
-        # print("PID:", pid)
-        # if current_patient_data.split(" ")[0] != "45843":
-        #     continue
+    def forward(self, x):
+        """Implement ResNet1d forward propagation"""
+        # First layers
+        x = self.conv1(x)
+        x = self.bn1(x)
 
-        # Get where murmur is for this patient
-        patient_data_series = pd.Series(current_patient_data.split('\n')[num_locations+1:])
-        murmur_locations = patient_data_series[patient_data_series.str.contains("Murmur location")].iloc[0].split(": ")[-1]
-        murmur_locations = murmur_locations.split("+")
+        # Residual blocks
+        y = x
+        for blk in self.res_blocks:
+            x, y = blk(x, y)
 
-        audios_embs_df = extract_embbeding(recordings, frequencies, SECONDS_PER_EMBEDDING, num_locations, recording_information, murmur_locations)
-
-        # Extract labels and use one-hot encoding.
-        current_labels = np.zeros(len(classes), dtype=int)
-        label = get_murmur(current_patient_data)
-        audios_embs_df["augmented"] = False
-        audios_embs_df["seconds"] = SECONDS_PER_EMBEDDING
-
-        # if label == "Present":
-        for extra in [SECONDS_PER_EMBEDDING-1, SECONDS_PER_EMBEDDING-0.5, SECONDS_PER_EMBEDDING+0.5,
-                      SECONDS_PER_EMBEDDING+1, SECONDS_PER_EMBEDDING+1.5, SECONDS_PER_EMBEDDING+2]:
-            extradf = extract_embbeding(recordings, frequencies, extra, num_locations, recording_information, murmur_locations)
-            extradf["augmented"] = True
-            extradf["seconds"] = extra
-            audios_embs_df = pd.concat([audios_embs_df, extradf])
-
-        if label in classes:
-            j = classes.index(label)
-            current_labels[j] = 1
-
-        audios_embs_df[classes[0]] = current_labels[0]
-        audios_embs_df[classes[1]] = current_labels[1]
-        audios_embs_df[classes[2]] = current_labels[2]
-        audios_embs_df[ID] = pid
-
-        patients_embs.append(audios_embs_df)
-
-    all_patients_embs_df = pd.concat(patients_embs)
-    return all_patients_embs_df
-
-
-def copy_test_data(test_ids, source, dest):
-
-    # Removes everything in the dest folder
-    [f.unlink() for f in Path(dest).glob("*") if f.is_file()]
-
-    # Copies selected files from the source to the dest folder
-    for pid in test_ids:
-        for f in Path(source).glob(pid + "*"):
-            shutil.copyfile(f, os.path.join(dest, os.path.basename(f)))
-
-class SimpleCNNBlock(Model):
-    def __init__(self, filters, kernelsize, cnnact="relu", batchnorm=False, maxpool=False):
-        super().__init__()
-
-        self.use_batchnorm = batchnorm
-        self.use_maxpool = maxpool
-        self.cnn = layers.Conv1D(filters, kernelsize, activation=cnnact, padding='same')
-        self.batchnorm = layers.BatchNormalization()
-        self.maxpool = layers.MaxPooling1D(2)
-
-    def call(self, input, training=False):
-        x = self.cnn(input)
-        if self.use_batchnorm:
-            x = self.batchnorm(x)
-        if self.use_maxpool:
-            x = self.maxpool(x)
+        x = self.identity(x)
+        x = self.avgpool(x)
+        # Flatten array
+        x = torch.flatten(x, 1)
+        # Fully conected layer
+        x = self.lin(x)
         return x
 
-class SimpleCNNBlock2D(Model):
-    def __init__(self, filters, kernelsize, cnnact="relu", batchnorm=False, maxpool=False):
-        super().__init__()
-
-        self.use_batchnorm = batchnorm
-        self.use_maxpool = maxpool
-        self.cnn = layers.Conv2D(filters, kernelsize, activation=cnnact, padding='same')
-        self.batchnorm = layers.BatchNormalization()
-        self.maxpool = layers.MaxPooling2D((2,2))
-
-    def call(self, input, training=False):
-        x = self.cnn(input)
-        if self.use_batchnorm:
-            x = self.batchnorm(x)
-        if self.use_maxpool:
-            x = self.maxpool(x)
-        return x
-
-class ResidualBlock1D(Model):
-
-    def __init__(self, filters, kernelsize):
-        super().__init__()
-
-        self.cnn1 = layers.Conv1D(filters, kernelsize, activation=layers.LeakyReLU(), padding='same')
-        self.cnn2 = layers.Conv1D(filters, kernelsize, activation=layers.LeakyReLU(), padding='same')
-        self.cnn3 = layers.Conv1D(filters, kernelsize, padding='same')
-        self.batchnorm1 = layers.BatchNormalization()
-        self.batchnorm2 = layers.BatchNormalization()
-        self.averagepool = layers.AveragePooling1D()
-        self.lastbatchnorm = layers.BatchNormalization()
-        self.relu = layers.ReLU()
-        self.add = layers.Add()
-
-    def call(self, input, training=False):
-        x1 = self.batchnorm1(self.cnn1(input))
-        x1 = self.batchnorm2(self.cnn2(x1))
-
-        x2 = self.cnn3(input)
-
-        out = self.add([x1, x2])
-        out = self.relu(out)
-        out = self.lastbatchnorm(out)
-        return out
-
-class ResidualBlock2D(Model):
-
-    def __init__(self, filters, kernelsize):
-        super().__init__()
-
-        self.cnn1 = layers.Conv2D(filters, kernelsize, activation=layers.LeakyReLU(), padding='same')
-        self.cnn2 = layers.Conv2D(filters, kernelsize, activation=layers.LeakyReLU(), padding='same')
-        self.cnn3 = layers.Conv2D(filters, kernelsize, padding='same')
-        self.batchnorm1 = layers.BatchNormalization()
-        self.batchnorm2 = layers.BatchNormalization()
-        self.averagepool = layers.AveragePooling2D()
-        self.lastbatchnorm = layers.BatchNormalization()
-        self.relu = layers.ReLU()
-        self.add = layers.Add()
-
-    def call(self, input, training=False):
-        x1 = self.batchnorm1(self.cnn1(input))
-        x1 = self.batchnorm2(self.cnn2(x1))
-
-        x2 = self.cnn3(input)
-
-        out = self.add([x1, x2])
-        out = self.relu(out)
-        out = self.lastbatchnorm(out)
-        return out
-
-class MyNetwork(Model):
-    def __init__(self, outputsize, internal_dim=4):
-        super().__init__()
-        self.outputsize = outputsize
-
-        self.masked_layer = layers.Masking(mask_value=NAVALUE)
-
-
-        self.cnnblock1 = SimpleCNNBlock2D(internal_dim, (3, 3), "relu", batchnorm=False, maxpool=False)
-        self.cnnblock2 = SimpleCNNBlock2D(internal_dim, (5, 5), "softplus", batchnorm=False, maxpool=False)
-        self.cnnblock3 = SimpleCNNBlock2D(internal_dim, (7, 7), "relu", batchnorm=False, maxpool=False)
-        self.cnnblock4 = SimpleCNNBlock2D(internal_dim, (7, 7), layers.ThresholdedReLU(theta=1.0), batchnorm=False, maxpool=False)
-
-        # self.cnn2 = layers.Conv1D(internal_dim, 5, activation='softplus', name="CNN2", padding='same')
-        # self.cnn3 = layers.Conv1D(internal_dim, 7, activation='relu', name="CNN3", padding='same')
-        # self.cnn4 = layers.Conv1D(internal_dim, 21, activation='softplus', name="CNN4", padding='same')
-        # self.cnn5 = layers.Conv1D(internal_dim, 9, activation='relu', name="CNN5", padding='same')
-        # self.cnn6 = layers.Conv1D(internal_dim, 4, activation='softplus', name="CNN6", padding='same')
-        # self.cnn7 = layers.Conv1D(internal_dim, 7, activation='tanh', name="CNN7", padding='same')
-        # self.cnn8 = layers.Conv1D(internal_dim, 11, activation='relu', name="CNN8", padding='same')
-        # self.cnn9 = layers.Conv1D(internal_dim, kernel_size=5, padding='same', activation=layers.ThresholdedReLU(theta=1.0))
-
-        self.resblock1 = ResidualBlock2D(internal_dim, (5, 5))
-        self.resblock2 = ResidualBlock2D(internal_dim, (7, 7))
-        self.resblock3 = ResidualBlock2D(internal_dim, (11, 11))
-
-        self.maxpool = layers.MaxPooling2D((2, 2))
-        self.gmaxpool = layers.GlobalMaxPooling2D()
-
-        self.batchnorm = layers.BatchNormalization()
-
-        #
-        self.flatten = layers.Flatten()
-        self.linear1 = layers.Dense(32, activation='relu', name="Linear1")
-        #self.linear2 = layers.Dense(128, activation='relu', name="Linear2")
-        #self.linear3 = layers.Dense(32, activation='relu', name="Linear3")
-        #
-        self.dropout30 = layers.Dropout(0.30)
-        self.dropout20 = layers.Dropout(0.20)
-        self.dropout50 = layers.Dropout(0.50)
-        self.dropout80 = layers.Dropout(0.80)
-        # self.lstm = layers.Bidirectional(layers.LSTM(internal_dim, return_sequences=True, dropout=.2))
-        # self.lstm = layers.LSTM(internal_dim)
-        #
-        self.outputlayer = layers.Dense(self.outputsize, activation='softmax', name="DenseSoftMax")
-        # self.cnnoutlayer = tf.keras.layers.Conv1D(3, 1, activation='softmax', padding='same', name="CNNout")
-
-
-    # def summary(self):
-    #     x = tf.keras.layers.Input(shape=(None, 16 * EMBEDDING_SIZE, 4))
-    #     model = Model(inputs=[x], outputs=self.call(x))
-    #     return model.summary()
-
-    def call(self, input, training=False):
-
-        masked = self.masked_layer(input)
-
-        x1 = self.cnnblock1(masked)
-        x1 = self.dropout80(x1)
-        x2 = self.cnnblock2(masked)
-        x2 = self.dropout80(x2)
-        x3 = self.cnnblock3(masked)
-        x3 = self.dropout80(x3)
-        x4 = self.cnnblock4(masked)
-        x4 = self.dropout80(x4)
-
-        # x1 = self.batchnorm(self.cnn1(masked))
-        # x2 = self.batchnorm(self.cnn2(masked))
-        # x3 = self.batchnorm(self.cnn3(masked))
-        # x4 = self.batchnorm(self.cnn4(masked))
-        # x5 = self.batchnorm(self.cnn5(masked))
-        # x6 = self.batchnorm(self.cnn6(masked))
-        # x7 = self.batchnorm(self.cnn7(masked))
-        # x8 = self.batchnorm(self.cnn8(masked))
-        # x9 = self.batchnorm(self.cnn9(masked))
-
-        resout = self.resblock1(x1 + x2 + x3 + x4)
-        resout = self.dropout50(resout)
-        resout = self.resblock2(resout)
-        resout = self.dropout50(resout)
-        resout = self.resblock3(resout)
-        resout = self.dropout50(resout)
-        # print("Shape resout:", resout.shape)
-        #
-        # # concat = tf.keras.layers.Concatenate(axis=2)([x1, x2, x3, x4, x5, x6, x7, x8, x9, resout])
-        # concat = tf.keras.layers.Concatenate(axis=2)([x1, x2, x3, x4, resout])
-        # resout = self.lstm(resout)
-
-        #x = self.lstm(concat)
-        # print("Shape 2:", concat.shape)
-        x = self.gmaxpool(resout)
-        # x = self.flatten(masked)
-
-        # print("Shape 3:", x.shape)
-        # x = self.linear1(x)
-        out = self.outputlayer(x)
-
-        return out
-
-
-def do_network_training(X_train, X_test, y_train, y_test):
-
-    MAX_EPOCHS = 300
-    #MAX_EPOCHS = 10
-
-    model = MyNetwork(y_train.shape[1])
-
-    lr = 0.0001
-    patience = 12
-
-    lr_schedule = tf.keras.optimizers.schedules.ExponentialDecay(lr, decay_steps=100000, decay_rate=0.98, staircase=True)
-
-    earlystopper = tf.keras.callbacks.EarlyStopping(patience=patience, monitor='val_loss', mode='auto',
-                                                    min_delta=0, verbose=0)
-
-    model.compile(optimizer=tfa.optimizers.AdamW(lr_schedule),
-                    #loss=tfa.losses.SigmoidFocalCrossEntropy(),
-                    loss=losses.CategoricalCrossentropy(label_smoothing=0.1)
-                    )
-
-    # class_weight = {0: 1.,
-    #                 1: 1.,
-    #                 2: 25.}
-    class_weight = {0: 1.3,
-                    1: 1,
-                    }
-
-    with tf.device('/cpu:0'):
-        model.fit(X_train, y_train,
-                  epochs=MAX_EPOCHS,
-                  shuffle=True,
-                  batch_size=64,
-                  validation_data=(X_test, y_test),
-                  callbacks=[earlystopper],
-                  class_weight=class_weight,
-                  )
-
-    model.summary()
-
-
-    return model
-
-def regroup(df, fillna_value=NAVALUE):
-
-    #new_idx = [(id, time, pos) for id in df[ID].unique() for pos in ['AV', 'PV', 'TV', 'MV'] for time in df[TIME_COUNTER].unique()]
-    new_idx = [(id, time, pos) for id in df[ID].unique() for pos in ['AV', 'PV', 'TV', 'MV'] for time in range(32)]
-    df = df.drop_duplicates(subset=[ID, TIME_COUNTER, POS])
-    df = df.set_index([ID, TIME_COUNTER, POS]).reindex(new_idx).reset_index()
-    df[classes] = df.groupby(ID)[classes].fillna(method="ffill").fillna(method="bfill")
-    return df.fillna(fillna_value)
-
-def get_numpy(df_in, get_y=True, fillna_value=NAVALUE):
-    if UNK_OPT in ["positive", "remove"]:
-        considered_classes = ['Absent', 'Present']
-    else:
-        considered_classes = classes
-
-    # In case this dataframe does not have all cols, we add them on the fly here.
-    # if 16 * EMBEDDING_SIZE not in df:
-    #     df = df.reindex(columns=["ID"] + list(range(16 * EMBEDDING_SIZE))).fillna(fillna_value)
-    df = df_in.copy()
-    # for r in range(EMBEDDING_SIZE):
-    #     df[r] = df[r].mean() / df[r].std()
-
-    xt = df.loc[:, range(EMBEDDING_SIZE)].values
-    #xt = (xt.mean() / xt.std())
-
-    if get_y:
-        yt = df.loc[:, considered_classes].astype(int).values
-
-    g = df.reset_index().groupby([ID, POS])
-    xtg = [xt[i.values, :] for k, i in g.groups.items()]
-    if get_y:
-        ytg = [yt[i.values, :] for k, i in g.groups.items()]
-        ytg = np.array(ytg)
-        ytg = ytg.reshape(df[ID].unique().shape[0], -1)[:, 0:len(considered_classes)]
-
-    xtg = np.array(xtg)
-    # xtg = xtg.reshape(-1, 4, df[TIME_COUNTER].unique().shape[0], 512)
-    xtg = xtg.reshape(-1, 4, 32, 512)
-    # xtg = np.swapaxes(xtg, 1, 2)
-
-    if get_y:
-        return xtg, ytg
-    else:
-        return xtg
-
-# Train your model.
-def train_challenge_model(data_folder, model_folder, verbose, submission=False):
-    # What should we do with Unknown (?): options "nothing", "positive", "remove"
-
-    # Find data files.
-    if verbose >= 1:
-        print('Finding data files...')
-
-    # Find the patient data files.
+# Split training data into training and testing
+def split_training_data(data_folder, save_folder):
     patient_files = find_patient_files(data_folder)
     num_patient_files = len(patient_files)
 
-    if num_patient_files == 0:
+    if num_patient_files==0:
         raise Exception('No data was provided.')
 
-    # Create a folder for the model if it does not already exist.
-    os.makedirs(model_folder, exist_ok=True)
-    # Extract the features and labels.
-    if verbose >= 1:
-        print('Extracting features and labels from the Challenge data...')
+    X_train, X_test, y_train, y_test = train_test_split(patient_files, range(len(patient_files)), test_size=0.2, random_state=42)
 
-    if os.path.exists(TEMP_FILE) and False:
-        print(" ----------------------------   Loading TEMP file! ------------------------------------------------")
-        print(TEMP_FILE)
-        all_patients_embs_df = pd.read_pickle(TEMP_FILE)
-    else:
-        all_patients_embs_df = get_embs_df_from_patient_data_long(num_patient_files, patient_files, data_folder, verbose)
-        try:
-            all_patients_embs_df.to_pickle(TEMP_FILE)
-        except:
-            print("Could not save TEMP file")
+    if os.path.exists(os.path.join(save_folder, 'train')):
+        shutil.rmtree(os.path.join(save_folder, 'train'))
+    os.makedirs(os.path.join(save_folder, 'train'),exist_ok=True)
+    for i in range(len(X_train)):
+        current_patient_data = load_patient_data(X_train[i])
+        patient_id = get_patient_id(current_patient_data)
+        shutil.copy(os.path.join(data_folder, patient_id+'.txt'), os.path.join(save_folder, 'train'))
+        num_locations = get_num_locations(current_patient_data)
+        recording_information = current_patient_data.split('\n')[1:num_locations+1]
+        for i in range(num_locations):
+            entries = recording_information[i].split(' ')
+            for i in range(1, len(entries)):
+                shutil.copy(os.path.join(data_folder, entries[i]), os.path.join(save_folder, 'train'))
 
-    #Stratify Sample
-    all_patients_embs_df.sort_values(by=["ID", "position"]).reset_index(drop=True)
+    if os.path.exists(os.path.join(save_folder, 'test')):
+        shutil.rmtree(os.path.join(save_folder, 'test'))
+    os.makedirs(os.path.join(save_folder, 'test'),exist_ok=True)
+    for i in range(len(X_test)):
+        current_patient_data = load_patient_data(X_test[i])
+        patient_id = get_patient_id(current_patient_data)
+        shutil.copy(os.path.join(data_folder, patient_id+'.txt'), os.path.join(save_folder, 'test'))
+        num_locations = get_num_locations(current_patient_data)
+        recording_information = current_patient_data.split('\n')[1:num_locations+1]
+        for i in range(num_locations):
+            entries = recording_information[i].split(' ')
+            for i in range(1, len(entries)):
+                shutil.copy(os.path.join(data_folder, entries[i]), os.path.join(save_folder, 'test'))
+    return os.path.join(save_folder, 'train'), os.path.join(save_folder, 'test')
 
-    if UNK_OPT == "positive":
-        # all_patients_embs_df.loc[all_patients_embs_df["Unknown"] == True, "has_murmur"] = True   # We could assume that unknown is positive label
-        all_patients_embs_df.loc[all_patients_embs_df["Unknown"] == True, "Present"] = True  # We could assume that unknown is positive label
-        all_patients_embs_df.loc[all_patients_embs_df["Unknown"] == True, "Unknown"] = False
-    elif UNK_OPT == "remove":
-        all_patients_embs_df = all_patients_embs_df[all_patients_embs_df["Unknown"] != True]  # Or we could just drop these instances
-    else:
-        pass
+def train_epoch(model, train_dataloader, criterion, optimizer, epoch):
+    losses = AverageMeter()
+    model.train()
+    epoch_iterator = tqdm(
+        train_dataloader, desc="Training epoch X, iter (X / X) (loss=X.X)", dynamic_ncols=True
+    )
+    all_label = []
+    all_output_softmax = []
+    all_output_argmax = []
+    for batch_idx, (data, label) in enumerate(epoch_iterator):
+        data = data.float().to(DEVICE)
+        label = label.long().to(DEVICE)
+        # compute output
+        output = model(data)
+        loss = criterion(output, label) + 3 * my_loss(output, label)
+        # compute gradient and do SGD step
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        # record loss
+        losses.update(loss.item(), data.shape[0])
+        output_softmax = F.softmax(output, dim=1)
+        output_argmax = torch.argmax(output_softmax, dim=1)
+        all_label.append(label.detach().cpu().numpy())
+        all_output_softmax.append(output_softmax.detach().cpu().numpy())
+        all_output_argmax.append(output_argmax.detach().cpu().numpy())
+        epoch_iterator.set_description(
+            "Training Epoch %d, iter (%d/%d) (loss=%2.5f)" % (epoch, batch_idx+1, len(epoch_iterator), loss.item())
+        )
+    all_label = to_one_hot_bool(np.concatenate(all_label), 3)
+    all_output_softmax = np.concatenate(all_output_softmax)
+    all_output_argmax = to_one_hot_bool(np.concatenate(all_output_argmax), 3)
+    # compute the accuracy
+    classes = ['Present', 'Unknown', 'Absent']
+    auroc, auprc, auroc_classes, auprc_classes = compute_auc(all_label, all_output_softmax)
+    accuracy = compute_accuracy(all_label, all_output_argmax)
+    f_measure, f_measure_classes = compute_f_measure(all_label, all_output_argmax)
+    challenge_score = compute_weighted_accuracy(all_label, all_output_argmax, classes)
+    accs = {
+        'auroc': auroc,
+        'auprc': auprc,
+        'accuracy': accuracy,
+        'f_measure': f_measure,
+        'challenge_score': challenge_score,
+    }
+    return losses.avg, accs
 
-    seed = 42
-    np.random.seed(seed)
+def test(model, test_folder):
+    model.eval()
+    patient_files = find_patient_files(test_folder)
+    num_patient_files = len(patient_files)
+    classes = ['Present', 'Unknown', 'Absent']
+    all_label = []
+    all_output_softmax = []
+    all_output_argmax = []
+    # load the current patient data and recordings.
+    threshold = 0.1
+    with torch.no_grad():
+        for i in range(num_patient_files):
+            # print(f'processing patient:{patient_files[i]}')
+            current_patient_data = load_patient_data(patient_files[i])
+            recordings = load_recordings_normalized(test_folder, current_patient_data)
+            # do prediction for each recording
+            out_softmaxs = []
+            out_argmaxs = []
+            for recording in recordings:
+                # now, let's just random pick one segment from the recording to make prediction
+                current_recording_length = recording.shape[0]
+                if current_recording_length > SEQ_LENGTH:
+                    start_point = 0
+                    steps = []
+                    while (start_point + SEQ_LENGTH) < current_recording_length:
+                        steps += [start_point]
+                        start_point += SEQ_LENGTH # non-overlap
+                    steps += [current_recording_length - SEQ_LENGTH]
+                    # start_point = np.random.randint(0, current_recording_length - SEQ_LENGTH)
+                    # print(f'steps:{steps}')
+                    recording_segments = []
+                    for step in steps:
+                        recording_segments.append(recording[step:step+SEQ_LENGTH])
+                    recording_segment = torch.from_numpy(np.stack(recording_segments)[:,np.newaxis,:]).float().to(DEVICE)
+                else: # padding with zeros
+                    recording_segment = np.zeros(SEQ_LENGTH)
+                    recording_segment[0:current_recording_length] = recording
+                    recording_segment = torch.from_numpy(recording_segment[None,None]).float().to(DEVICE)
+                # make prediction
+                out = model(recording_segment)
+                out_softmax = F.softmax(out, dim=1)
+                out_argmax = torch.argmax(out_softmax, dim=1)
+                # if there are multiple segments in this recording, the final prediction is the one with the largest 0 probability
+                out_softmax_0 = out_softmax[:,0]
+                max_0_index = torch.argmax(out_softmax_0, dim=0)
+                out_softmaxs.append(out_softmax[max_0_index].cpu().numpy())
+                out_argmaxs.append(out_argmax[max_0_index].cpu().numpy())
+            # if one location predicts "has murmur", then the final prediction will be "has murmur", then for "Unknown", then for "Absent"
+            all_output_argmax.append(min(out_argmaxs))
+            all_output_softmax.append(out_softmaxs[out_argmaxs.index(min(out_argmaxs))])
+            label = get_murmur(current_patient_data)
+            label = classes.index(label)
+            all_label.append(label)
+    all_label = to_one_hot_bool(np.stack(all_label), 3)
+    all_output_softmax = np.stack(all_output_softmax)
+    all_output_argmax = to_one_hot_bool(np.stack(all_output_argmax), 3)
+    # compute the accuracy
+    classes = ['Present', 'Unknown', 'Absent']
+    auroc, auprc, auroc_classes, auprc_classes = compute_auc(all_label, all_output_softmax)
+    accuracy = compute_accuracy(all_label, all_output_argmax)
+    f_measure, f_measure_classes = compute_f_measure(all_label, all_output_argmax)
+    challenge_score = compute_weighted_accuracy(all_label, all_output_argmax, classes)
+    accs = {
+        'auroc': auroc,
+        'auprc': auprc,
+        'accuracy': accuracy,
+        'f_measure': f_measure,
+        'challenge_score': challenge_score,
+    }
+    return accs
 
-    all_patients_embs_df = all_patients_embs_df[(all_patients_embs_df["augmented"] == False) |
-                                                ((all_patients_embs_df["Present"] == True) & (all_patients_embs_df["augmented"] == True))
-                                                ]  # Or we could just drop these instances
-    pids = all_patients_embs_df["ID"].unique()
-    np.random.shuffle(pids)
-
-    train_ids = set(pids[:int(pids.shape[0]*.8)])
-    test_ids = set(pids) - train_ids
-
-    train_data = all_patients_embs_df[all_patients_embs_df["ID"].isin(train_ids)]
-    test_data = all_patients_embs_df[all_patients_embs_df["ID"].isin(test_ids)]
-
-    train_data = train_data.reset_index(drop=True)
-    train_data.loc[train_data["seconds"] != 2, "ID"] = train_data[train_data["seconds"] != 2][["ID", "seconds"]].apply(lambda x: str(x[0]) + "_" + str(x[1]), axis=1)
-
-    train_data = regroup(train_data)  # Shape should be something like (-1, 4, 16*512)
-    test_data = regroup(test_data)
-
-    X_train, y_train = get_numpy(train_data)
-    X_test, y_test = get_numpy(test_data)
-
-    if not submission:
-        copy_test_data(test_ids, "all_training_data/", "test_data/")
-
-    X_train = tf.convert_to_tensor(X_train, tf.float32)
-    X_test = tf.convert_to_tensor(X_test, tf.float32)
-    y_train = y_train.astype('float32')
-    y_test = y_test.astype('float32')
-
-    model = do_network_training(X_train, X_test, y_train, y_test)
-
-    preds = model.predict(X_test).argmax(axis=1)
-    labels = y_test.argmax(axis=1)
-
-    print("Predictions:", preds)
-    print(classification_report(labels, preds))
-    print(confusion_matrix(labels, preds))
-
-    # Save the model.
-    save_challenge_model(model_folder, classes, model)
-
-    if verbose >= 1:
-        print('Done.')
-
-def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_cache=True):
-
-    fields = data.split("\n")[0].split(" ")
-
-    pid = fields[0]
-    num_locations = int(fields[1])
-    frequency_sample_rate = int(fields[2])
-    recording_information = data.split("\n")[1: 1+num_locations]
-
-    # Debugging
-    # if pid != "85108":
-    #     return classes,  [1,0,0],  [1,0,0]
-
-    if use_cache and False:
-        all_patients_embs_df = pd.read_pickle(TEMP_FILE)
-        df_input = all_patients_embs_df[all_patients_embs_df["ID"] == str(pid)]
-        df_input = df_input[df_input["augmented"] != True]
-    else:
-
-        df_input = extract_embbeding(recordings, [frequency_sample_rate] * len(recordings), SECONDS_PER_EMBEDDING, num_locations, recording_information, murmur_locations=None)
-        df_input["ID"] = pid
-        for col in ['Unknown', 'Present', 'Absent']:
-            df_input[col] = 0
-
-    test_data = regroup(df_input)
-    X_test = get_numpy(test_data, get_y=False)
-    X_test = tf.convert_to_tensor(X_test, tf.float32)
+# Train your model.
+def train_challenge_model(data_folder, model_folder, verbose):
     
-    
-    probs = model.predict(X_test)[0]
+    # download the pretrained model
+    # download_model_from_url('https://www3.nd.edu/~scl/models/model.pth',model_folder,'model.pth')
+    # split training data
+    print('Splitting data...')
+    train_data_dir, test_data_dir = split_training_data(data_folder, model_folder)
+    print('Splitting data finished...')
+    # define model
+    model = ResNet1d(
+        input_dim=(1,SEQ_LENGTH), 
+        blocks_dim=list(zip([64, 128, 196, 256, 320], [8192, 2048, 512, 128, 64])), 
+        n_classes=3, 
+        kernel_size=17, 
+        dropout_rate=0.8,
+    )
+    model.to(DEVICE)
+    # define criterion and optimizer
+    class_weights = torch.Tensor([5.0,1.0,1.0]).to(DEVICE)
+    criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(DEVICE)
+    optimizer = torch.optim.Adam(model.parameters(), 1e-4, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[80], gamma=0.1)
+    # define dataloader
+    train_dataset = physionet22_dataset(data_dir=train_data_dir, recording_length=SEQ_LENGTH)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset,
+                                                    batch_size=128,
+                                                    shuffle=True,
+                                                    num_workers=8,
+                                                    drop_last=False)
+    best_challenge_score = 100000
+    print('Start training...')
+    for epoch in range(EPOCHS):
+        training_loss, training_accs = train_epoch(model, train_dataloader, criterion, optimizer, epoch)
+        scheduler.step()
+        test_accs = test(model, test_data_dir)
+        # for k, v in training_accs.items():
+        #     print(f"Training: {k}:{v:.4f}")
+        # for k, v in test_accs.items():
+        #     print(f"Test: {k}:{v:.4f}")
+        # save the current model
+        os.makedirs(model_folder, exist_ok=True)
+        torch.save(model.state_dict(), os.path.join(model_folder, "latest.pth"))
+        # save the best model so far
+        if best_challenge_score > test_accs['challenge_score']:
+            best_challenge_score = test_accs['challenge_score']
+            torch.save(model.state_dict(), os.path.join(model_folder, "best.pth"))
+        print(f'Best challenge score so far:{best_challenge_score:.4f}')
+    return 0
 
-    pred = np.zeros(3)
-    if probs[1] >= 0.49:
-        pred[1] = 1
-    elif probs[1] > 0.45:
-        pred[2] = 1
-    else:
-        if df_input["Present"].sum() > 1:
-            print("PID:", pid)
-        pred[0] = 1
+# Load your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
+# arguments of this function.
+def load_challenge_model(model_folder, verbose):
+    # define model
+    model = ResNet1d(
+        input_dim=(1,SEQ_LENGTH), 
+        blocks_dim=list(zip([64, 128, 196, 256, 320], [8192, 2048, 512, 128, 64])), 
+        n_classes=3, 
+        kernel_size=17, 
+        dropout_rate=0.8,
+    )
+    # load the pretrained model
+    model_dict = torch.load(os.path.join(model_folder, 'best.pth'), map_location='cpu')
+    model.load_state_dict(model_dict)
+    model.eval()
+    return model
 
-    if UNK_OPT in ["positive", "remove"]:
-        # probs would have only the labels to "absent", "present". Here we append the prob of 0.0 to unknown
-        # An alternative is assingin the unknown class in case "present" or "absent" is no so strong (i.e., both close to 0.5)
-        if pred[2] != 1:
-            probs = np.append(probs, [0])
-        else:
-            probs = np.append(probs - 0.2, [0.4])
-
-    return classes, pred, list(probs)
+# Run your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
+# arguments of this function.
+def run_challenge_model(model, data, recordings, verbose):
+    classes = ['Present', 'Unknown', 'Absent']
+    all_probabilities = []
+    all_labels = []
+    # do prediction for each recording
+    if verbose:
+        patient_id = get_patient_id(data)
+        print(f'processing patient_id:{patient_id}')
+    with torch.no_grad():
+        for recording in recordings:
+            # normalized recording
+            recording_mean = recording.mean()
+            recording_std = recording.std()
+            recording = (recording - recording_mean) / recording_std
+            current_recording_length = recording.shape[0]
+            # divide the whole recording into non-overlap segments, and predict each segment
+            if current_recording_length > SEQ_LENGTH:
+                start_point = 0
+                steps = []
+                while (start_point + SEQ_LENGTH) < current_recording_length:
+                    steps += [start_point]
+                    start_point += SEQ_LENGTH # non-overlap
+                steps += [current_recording_length - SEQ_LENGTH]
+                # print(f'steps:{steps}')
+                recording_segments = []
+                for step in steps:
+                    recording_segments.append(recording[step:step+SEQ_LENGTH])
+                recording_segment = torch.from_numpy(np.stack(recording_segments)[:,np.newaxis,:]).float()
+            else: # padding with zeros
+                recording_segment = np.zeros(SEQ_LENGTH)
+                recording_segment[0:current_recording_length] = recording
+                recording_segment = torch.from_numpy(recording_segment[None,None]).float()
+            # make prediction
+            out = model(recording_segment)
+            out_softmax = F.softmax(out, dim=1)
+            out_argmax = torch.argmax(out_softmax, dim=1)
+            # if there are multiple segments in this recording, the final prediction is the one with the largest "Present" probability
+            out_softmax_0 = out_softmax[:,0]
+            max_0_index = torch.argmax(out_softmax_0, dim=0)
+            all_probabilities.append(out_softmax[max_0_index].detach().cpu().numpy())
+            all_labels.append(out_argmax[max_0_index].detach().cpu().numpy())
+    labels = to_one_hot_bool(min(all_labels), len(classes))
+    probabilities = all_probabilities[all_labels.index(min(all_labels))]
+    return classes, labels, probabilities
 
 ################################################################################
 #
@@ -575,23 +607,11 @@ def run_challenge_model(model, data, recordings, verbose, thresholds=None, use_c
 #
 ################################################################################
 
-# Load your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
-# arguments of this function.
-def load_challenge_model(model_folder, verbose):
-    from keras.models import load_model
-    return load_model(os.path.join(model_folder, 'keras_model'))
-    # load_config(os.path.join(model_folder, 'config.sav'))
-    # return load_model(os.path.join(model_folder, 'model.sav'))
-
-
 # Save your trained model.
 def save_challenge_model(model_folder, classes, classifier):
-    classifier.save(os.path.join(model_folder, 'keras_model'))
-
-    # filename = os.path.join(model_folder, 'model.sav')
-    # save_model(classifier, filename)
-    # save_config(os.path.join(model_folder, 'config.sav'))
-
+    d = {'classes': classes, 'classifier': classifier}
+    filename = os.path.join(model_folder, 'model.sav')
+    joblib.dump(d, filename, protocol=0)
 
 # Extract features from the data.
 def get_features(data, recordings):
@@ -729,3 +749,123 @@ def download_model_from_url(url, model_dir, file_name):
         sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
         hash_prefix = None
         download_url_to_file(url, cached_file, hash_prefix, progress=True)
+
+# Load recordings and return dict
+def load_recordings_return_dict(data_folder, data):
+    # Now get the recordings in txt file
+    num_locations = get_num_locations(data)
+    recording_information = data.split('\n')[1:num_locations+1]
+    recordings_dict = {}
+    for i in range(num_locations):
+        entries = recording_information[i].split(' ')
+        current_location = entries[0]
+        recording_file = entries[2]
+        filename = os.path.join(data_folder, recording_file)
+        recording, frequency = load_wav_file(filename)
+        recording = recording.astype(np.float)
+        # do we need to do normalization?
+        recording_mean = recording.mean()
+        recording_std = recording.std()
+        recording = (recording - recording_mean) / recording_std
+        # update the recordings_dict with the loaded recording
+        recordings_dict[current_location] = recording
+    return recordings_dict
+
+# Load recordings.
+def load_recordings_normalized(data_folder, data):
+    num_locations = get_num_locations(data)
+    recording_information = data.split('\n')[1:num_locations+1]
+    recordings = list()
+    for i in range(num_locations):
+        entries = recording_information[i].split(' ')
+        recording_file = entries[2]
+        filename = os.path.join(data_folder, recording_file)
+        recording, frequency = load_wav_file(filename)
+        # do we need to do normalization?
+        recording_mean = recording.mean()
+        recording_std = recording.std()
+        recording = (recording - recording_mean) / recording_std
+        recordings.append(recording)
+    return recordings
+
+class physionet22_dataset(Dataset):
+
+    def __init__(self, data_dir, recording_length):
+        """
+        data_dir: training/validation/test data folder
+        recording_length: the length of recording segment we want to cut for the original recording
+        """
+        patient_files = find_patient_files(data_dir)
+        num_patient_files = len(patient_files)
+        self.recordings = []
+        self.labels = []
+        self.recording_length = recording_length
+        classes = ['Present', 'Unknown', 'Absent']
+        # load the current patient data and recordings.
+        for i in range(num_patient_files):
+            current_patient_data = load_patient_data(patient_files[i])
+            recordings_dict = load_recordings_return_dict(data_dir, current_patient_data)
+            num_locations = len(recordings_dict)
+            label = get_murmur(current_patient_data)
+            label = classes.index(label)
+            # if murmur is present, only keep the locations with murmur, otherwise all locations are Unknown/Absent
+            if label == 0:
+                # get all the locations with murmurs
+                patient_data_series = pd.Series(current_patient_data.split('\n')[num_locations+1:])
+                murmur_locations = patient_data_series[patient_data_series.str.contains("Murmur location")].iloc[0].split(": ")[-1]
+                murmur_locations = murmur_locations.split("+")
+                for location in murmur_locations:
+                    self.recordings.append(recordings_dict[location])
+                    self.labels.append(label)
+            # if murmur is Unkown, we do not know which location is unknown, let's just throw this patient away
+            elif label == 1:
+                pass
+            else:
+                for k, v in recordings_dict.items():
+                    self.recordings.append(recordings_dict[k])
+                    self.labels.append(label)
+
+    def __getitem__(self, index):
+        # get the recordings of current patient
+        recording = self.recordings[index]
+        current_recording_length = recording.shape[0]
+        # random sample a segment from current recording, kind of like data augmentation?
+        if current_recording_length > self.recording_length:
+            start_point = np.random.randint(0, current_recording_length - self.recording_length)
+            data = recording[start_point:start_point+self.recording_length]
+        else: # do padding
+            data = np.zeros(self.recording_length)
+            data[0:current_recording_length] = recording
+        return data[None], self.labels[index]
+
+    def  __len__(self):
+        return len(self.recordings)
+
+# define a custumized loss function to penalized the false negatives when murmurs is presenet or unknown
+def my_loss(output, target):
+    output = F.log_softmax(output, dim=1)
+    # convert the target into one-hot encoding
+    target_onehot = F.one_hot(target, num_classes=3)
+    # activate when ground truth is 0 or 1
+    target_onehot_comp = 1 - target_onehot
+    loss = output * target_onehot_comp
+    # minimize the probability of predicting 2
+    return loss[:, 2].mean()
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count

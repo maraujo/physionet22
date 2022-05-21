@@ -15,7 +15,7 @@ def process_folder(commit="current"):
         print("Commit: {} Fold: {}".format(commit, fold))
         if RUN_TYPE == "docker":
             folder = "/physionet_data/challenge/files/cross-validation-data-1-0-3/{}/".format(fold)
-            os.system("docker run --rm --memory 10000mb -v {}model:/physionet/model -v {}/test:/physionet/test_data -v {}/test_outputs:/physionet/test_outputs/ -v {}/train/:/physionet/training_data image bash ./test_in_docker.bash".format(folder,folder,folder,folder))
+            os.system("docker run --rm --memory 12000mb -v {}model:/physionet/model -v {}/test:/physionet/test_data -v {}/test_outputs:/physionet/test_outputs/ -v {}/train/:/physionet/training_data image bash ./test_in_docker.bash".format(folder,folder,folder,folder))
         elif RUN_TYPE == "system":
             folder = "./"
             os.system("bash test_code_quick.bash {}".format(fold))

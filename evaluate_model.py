@@ -15,6 +15,7 @@
 
 import os, os.path, sys, numpy as np
 from helper_code import load_patient_data, get_murmur, get_outcome, load_challenge_outputs, compare_strings
+from sklearn.metrics import confusion_matrix
 
 # Evaluate the models.
 def evaluate_model(label_folder, output_folder):
@@ -34,6 +35,14 @@ def evaluate_model(label_folder, output_folder):
     murmur_binary_outputs = enforce_positives(murmur_binary_outputs, murmur_classes, 'Present')
     outcome_labels = enforce_positives(outcome_labels, outcome_classes, 'Abnormal')
     outcome_binary_outputs = enforce_positives(outcome_binary_outputs, outcome_classes, 'Abnormal')
+    
+    murmur_tn, murmur_fp, murmur_fn, murmur_tp = confusion_matrix(murmur_labels[:,0], murmur_binary_outputs[:,0]).ravel()
+    murmur_sensitivity = murmur_tp / (murmur_tp + murmur_fn)
+    murmur_specificity = murmur_tn / (murmur_tn + murmur_fp)
+    
+    outcome_tn, outcome_fp, outcome_fn, outcome_tp = confusion_matrix(outcome_labels[:,0], outcome_binary_outputs[:,0]).ravel()
+    outcome_sensitivity = outcome_tp / (outcome_tp + outcome_fn)
+    outcome_specificity = outcome_tn / (outcome_tn + outcome_fp)
 
     # Evaluate the murmur model by comparing the labels and model outputs.
     murmur_auroc, murmur_auprc, murmur_auroc_classes, murmur_auprc_classes = compute_auc(murmur_labels, murmur_scalar_outputs)
@@ -42,7 +51,8 @@ def evaluate_model(label_folder, output_folder):
     murmur_weighted_accuracy = compute_weighted_accuracy(murmur_labels, murmur_binary_outputs, murmur_classes) # This is the murmur scoring metric.
     murmur_cost = compute_cost(outcome_labels, murmur_binary_outputs, outcome_classes, murmur_classes) # Use *outcomes* to score *murmurs* for the Challenge cost metric, but this is not the actual murmur scoring metric.
     murmur_scores = (murmur_classes, murmur_auroc, murmur_auprc, murmur_auroc_classes, murmur_auprc_classes, \
-        murmur_f_measure, murmur_f_measure_classes, murmur_accuracy, murmur_accuracy_classes, murmur_weighted_accuracy, murmur_cost)
+        murmur_f_measure, murmur_f_measure_classes, murmur_accuracy, murmur_accuracy_classes, murmur_weighted_accuracy, murmur_cost, \
+            murmur_tn, murmur_fp, murmur_fn, murmur_tp, murmur_sensitivity, murmur_specificity)
 
     # Evaluate the outcome model by comparing the labels and model outputs.
     outcome_auroc, outcome_auprc, outcome_auroc_classes, outcome_auprc_classes = compute_auc(outcome_labels, outcome_scalar_outputs)
@@ -51,7 +61,8 @@ def evaluate_model(label_folder, output_folder):
     outcome_weighted_accuracy = compute_weighted_accuracy(outcome_labels, outcome_binary_outputs, outcome_classes)
     outcome_cost = compute_cost(outcome_labels, outcome_binary_outputs, outcome_classes, outcome_classes) # This is the clinical outcomes scoring metric.
     outcome_scores = (outcome_classes, outcome_auroc, outcome_auprc, outcome_auroc_classes, outcome_auprc_classes, \
-        outcome_f_measure, outcome_f_measure_classes, outcome_accuracy, outcome_accuracy_classes, outcome_weighted_accuracy, outcome_cost)
+        outcome_f_measure, outcome_f_measure_classes, outcome_accuracy, outcome_accuracy_classes, outcome_weighted_accuracy, outcome_cost, \
+            outcome_tn, outcome_fp, outcome_fn, outcome_tp, outcome_sensitivity, outcome_specificity)
 
     # Return the results.
     return murmur_scores, outcome_scores
@@ -402,8 +413,8 @@ def compute_cost(labels, outputs, label_classes, output_classes):
 if __name__ == '__main__':
     murmur_scores, outcome_scores = evaluate_model(sys.argv[1], sys.argv[2])
 
-    classes, auroc, auprc, auroc_classes, auprc_classes, f_measure, f_measure_classes, accuracy, accuracy_classes, weighted_accuracy, cost = murmur_scores
-    murmur_output_string = 'AUROC,AUPRC,F-measure,Accuracy,Weighted Accuracy,Cost\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\n'.format(auroc, auprc, f_measure, accuracy, weighted_accuracy, cost)
+    classes, auroc, auprc, auroc_classes, auprc_classes, f_measure, f_measure_classes, accuracy, accuracy_classes, weighted_accuracy, cost, murmur_tn, murmur_fp, murmur_fn, murmur_tp, murmur_sensitivity, murmur_specificity = murmur_scores
+    murmur_output_string = 'AUROC,AUPRC,F-measure,Accuracy,Weighted Accuracy,Cost, TN, FP, FN, FP, Sensitivity, Specificity\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}, {:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\n'.format(auroc, auprc, f_measure, accuracy, weighted_accuracy, cost,  murmur_tn, murmur_fp, murmur_fn, murmur_tp, murmur_sensitivity, murmur_specificity )
     murmur_class_output_string = 'Classes,{}\nAUROC,{}\nAUPRC,{}\nF-measure,{}\nAccuracy,{}\n'.format(
         ','.join(classes),
         ','.join('{:.3f}'.format(x) for x in auroc_classes),
@@ -411,8 +422,8 @@ if __name__ == '__main__':
         ','.join('{:.3f}'.format(x) for x in f_measure_classes),
         ','.join('{:.3f}'.format(x) for x in accuracy_classes))
 
-    classes, auroc, auprc, auroc_classes, auprc_classes, f_measure, f_measure_classes, accuracy, accuracy_classes, weighted_accuracy, cost = outcome_scores
-    outcome_output_string = 'AUROC,AUPRC,F-measure,Accuracy,Weighted Accuracy,Cost\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\n'.format(auroc, auprc, f_measure, accuracy, weighted_accuracy, cost)
+    classes, auroc, auprc, auroc_classes, auprc_classes, f_measure, f_measure_classes, accuracy, accuracy_classes, weighted_accuracy, cost, outcome_tn, outcome_fp, outcome_fn, outcome_tp, outcome_sensitivity, outcome_specificity = outcome_scores
+    outcome_output_string = 'AUROC,AUPRC,F-measure,Accuracy,Weighted Accuracy,Cost, TN, FP, FN, FP, Sensitivity, Specificity\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}, {:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\n'.format(auroc, auprc, f_measure, accuracy, weighted_accuracy, cost, outcome_tn, outcome_fp, outcome_fn, outcome_tp, outcome_sensitivity, outcome_specificity)
     outcome_class_output_string = 'Classes,{}\nAUROC,{}\nAUPRC,{}\nF-measure,{}\nAccuracy,{}\n'.format(
         ','.join(classes),
         ','.join('{:.3f}'.format(x) for x in auroc_classes),
@@ -422,9 +433,13 @@ if __name__ == '__main__':
 
     output_string = '#Murmur scores\n' + murmur_output_string + '\n#Outcome scores\n' + outcome_output_string \
         + '\n#Murmur scores (per class)\n' + murmur_class_output_string + '\n#Outcome scores (per class)\n' + outcome_class_output_string
-
+    print(output_string)
     if len(sys.argv) == 3:
         print(output_string)
     elif len(sys.argv) == 4:
-        with open(sys.argv[3], 'w') as f:
-            f.write(output_string)
+        murmur_file = sys.argv[3].rstrip(os.sep) + os.sep + "murmur_result.csv"
+        outcome_file = sys.argv[3].rstrip(os.sep) + os.sep + "outcome_result.csv"
+        with open(murmur_file, 'w') as f:
+            f.write(murmur_output_string)
+        with open(outcome_file, 'w') as f:
+            f.write(outcome_output_string)

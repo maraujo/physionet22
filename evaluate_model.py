@@ -36,13 +36,17 @@ def evaluate_model(label_folder, output_folder):
     outcome_labels = enforce_positives(outcome_labels, outcome_classes, 'Abnormal')
     outcome_binary_outputs = enforce_positives(outcome_binary_outputs, outcome_classes, 'Abnormal')
     
-    murmur_tn, murmur_fp, murmur_fn, murmur_tp = confusion_matrix(murmur_labels[:,0], murmur_binary_outputs[:,0]).ravel()
-    murmur_sensitivity = murmur_tp / (murmur_tp + murmur_fn)
-    murmur_specificity = murmur_tn / (murmur_tn + murmur_fp)
-    
-    outcome_tn, outcome_fp, outcome_fn, outcome_tp = confusion_matrix(outcome_labels[:,0], outcome_binary_outputs[:,0]).ravel()
-    outcome_sensitivity = outcome_tp / (outcome_tp + outcome_fn)
-    outcome_specificity = outcome_tn / (outcome_tn + outcome_fp)
+    try:
+        murmur_tn, murmur_fp, murmur_fn, murmur_tp = confusion_matrix(murmur_labels[:,0], murmur_binary_outputs[:,0]).ravel()
+        murmur_sensitivity = murmur_tp / (murmur_tp + murmur_fn)
+        murmur_specificity = murmur_tn / (murmur_tn + murmur_fp)
+        
+        outcome_tn, outcome_fp, outcome_fn, outcome_tp = confusion_matrix(outcome_labels[:,0], outcome_binary_outputs[:,0]).ravel()
+        outcome_sensitivity = outcome_tp / (outcome_tp + outcome_fn)
+        outcome_specificity = outcome_tn / (outcome_tn + outcome_fp)
+    except ValueError:
+        murmur_tn, murmur_fp, murmur_fn, murmur_tp, murmur_sensitivity, murmur_specificity = 0,0,0,0,0,0
+        outcome_tn, outcome_fp, outcome_fn, outcome_tp, outcome_sensitivity, outcome_specificity = 0,0,0,0,0,0
 
     # Evaluate the murmur model by comparing the labels and model outputs.
     murmur_auroc, murmur_auprc, murmur_auroc_classes, murmur_auprc_classes = compute_auc(murmur_labels, murmur_scalar_outputs)

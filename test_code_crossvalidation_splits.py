@@ -6,7 +6,7 @@ N_FOLDERS = 10
 murmur_results = []
 outcome_results = []
 RUN_TYPE = "system" # docker or system
-def process_folder():
+def process_folder(commit="current"):
     os.system("cp ../evaluate_model.py ./")
     os.system("cp ../test_in_docker.bash ./")
     if RUN_TYPE == "docker":
@@ -20,18 +20,17 @@ def process_folder():
             folder = "./"
             os.system("bash test_code_quick.bash {}".format(fold))
         murmur_script_path = folder + "model/murmur_result.csv"
-        outcome_script_path = folder + "model/outcome_result.csv"
         murmur_result = pd.read_csv(murmur_script_path)
         murmur_result["name"] = commit
         murmur_result["fold"] = fold
         murmur_results.append(murmur_result.iloc[0])
-        pd.DataFrame(murmur_results).to_csv("../murmur_final_result.csv")
+        pd.DataFrame(murmur_results).to_csv("../murmur_final_result_{}.csv".format(commit))
         outcome_script_path = folder + "model/outcome_result.csv"
         outcome_result = pd.read_csv(murmur_script_path)
         outcome_result["name"] = commit
         outcome_result["fold"] = fold
         outcome_results.append(outcome_result.iloc[0])
-        pd.DataFrame(outcome_results).to_csv("../outcome_final_result.csv")
+        pd.DataFrame(outcome_results).to_csv("../outcome_final_result_{}.csv".format(commit))
 
 if __name__ == "__main__":
     if commits == []:
@@ -40,5 +39,5 @@ if __name__ == "__main__":
         for commit in commits:
             os.system("git checkout -f {}".format(commit))
             os.system("git status")
-            process_folder()
+            process_folder(commit)
     

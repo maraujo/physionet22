@@ -418,7 +418,7 @@ if __name__ == '__main__':
     murmur_scores, outcome_scores = evaluate_model(sys.argv[1], sys.argv[2])
 
     classes, auroc, auprc, auroc_classes, auprc_classes, f_measure, f_measure_classes, accuracy, accuracy_classes, weighted_accuracy, cost, murmur_tn, murmur_fp, murmur_fn, murmur_tp, murmur_sensitivity, murmur_specificity = murmur_scores
-    murmur_output_string = 'AUROC,AUPRC,F-measure,Accuracy,Weighted Accuracy,Cost, TN, FP, FN, FP, Sensitivity, Specificity\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}, {:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\n'.format(auroc, auprc, f_measure, accuracy, weighted_accuracy, cost,  murmur_tn, murmur_fp, murmur_fn, murmur_tp, murmur_sensitivity, murmur_specificity )
+    murmur_output_string = 'AUROC,AUPRC,F-measure,Accuracy,Weighted Accuracy,Cost, TN, FP, FN, TP, Sensitivity, Specificity\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}, {:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\n'.format(auroc, auprc, f_measure, accuracy, weighted_accuracy, cost,  murmur_tn, murmur_fp, murmur_fn, murmur_tp, murmur_sensitivity, murmur_specificity )
     murmur_class_output_string = 'Classes,{}\nAUROC,{}\nAUPRC,{}\nF-measure,{}\nAccuracy,{}\n'.format(
         ','.join(classes),
         ','.join('{:.3f}'.format(x) for x in auroc_classes),
@@ -427,7 +427,7 @@ if __name__ == '__main__':
         ','.join('{:.3f}'.format(x) for x in accuracy_classes))
 
     classes, auroc, auprc, auroc_classes, auprc_classes, f_measure, f_measure_classes, accuracy, accuracy_classes, weighted_accuracy, cost, outcome_tn, outcome_fp, outcome_fn, outcome_tp, outcome_sensitivity, outcome_specificity = outcome_scores
-    outcome_output_string = 'AUROC,AUPRC,F-measure,Accuracy,Weighted Accuracy,Cost, TN, FP, FN, FP, Sensitivity, Specificity\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}, {:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\n'.format(auroc, auprc, f_measure, accuracy, weighted_accuracy, cost, outcome_tn, outcome_fp, outcome_fn, outcome_tp, outcome_sensitivity, outcome_specificity)
+    outcome_output_string = 'AUROC,AUPRC,F-measure,Accuracy,Weighted Accuracy,Cost, TN, FP, FN, TP, Sensitivity, Specificity\n{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}, {:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\n'.format(auroc, auprc, f_measure, accuracy, weighted_accuracy, cost, outcome_tn, outcome_fp, outcome_fn, outcome_tp, outcome_sensitivity, outcome_specificity)
     outcome_class_output_string = 'Classes,{}\nAUROC,{}\nAUPRC,{}\nF-measure,{}\nAccuracy,{}\n'.format(
         ','.join(classes),
         ','.join('{:.3f}'.format(x) for x in auroc_classes),

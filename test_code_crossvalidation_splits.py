@@ -2,10 +2,10 @@ import os
 import pandas as pd
 commits = []
 #Run image against crossvalidation
-N_FOLDERS = 10
+N_FOLDERS = 5
 murmur_results = []
 outcome_results = []
-RUN_TYPE = "system" # docker or system
+RUN_TYPE = "docker" # docker or system
 def process_folder(commit="current"):
     os.system("cp ../evaluate_model.py ./")
     os.system("cp ../test_in_docker.bash ./")

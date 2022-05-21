@@ -1,14 +1,12 @@
 import os
 import pandas as pd
-commits = ["e288ff0e6d55935c3b2a3679f97205f3ecf75650"]
+commits = []
 #Run image against crossvalidation
 N_FOLDERS = 10
 murmur_results = []
 outcome_results = []
-RUN_TYPE = "docker" # docker or system
-for commit in commits:
-    os.system("git checkout -f {}".format(commit))
-    os.system("git status")
+RUN_TYPE = "system" # docker or system
+def process_folder():
     os.system("cp ../evaluate_model.py ./")
     os.system("cp ../test_in_docker.bash ./")
     if RUN_TYPE == "docker":
@@ -28,10 +26,19 @@ for commit in commits:
         murmur_result["fold"] = fold
         murmur_results.append(murmur_result.iloc[0])
         pd.DataFrame(murmur_results).to_csv("../murmur_final_result.csv")
-        
         outcome_script_path = folder + "model/outcome_result.csv"
         outcome_result = pd.read_csv(murmur_script_path)
         outcome_result["name"] = commit
         outcome_result["fold"] = fold
         outcome_results.append(outcome_result.iloc[0])
         pd.DataFrame(outcome_results).to_csv("../outcome_final_result.csv")
+
+if __name__ == "__main__":
+    if commits == []:
+        process_folder()
+    else:
+        for commit in commits:
+            os.system("git checkout -f {}".format(commit))
+            os.system("git status")
+            process_folder()
+    

@@ -513,9 +513,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # define dataloader
     train_dataset = physionet22_dataset(data_dir=train_data_dir, recording_length=SEQ_LENGTH)
     train_dataloader = torch.utils.data.DataLoader(train_dataset,
-                                                    batch_size=16,
+                                                    batch_size=128,
                                                     shuffle=True,
-                                                    num_workers=1,
+                                                    num_workers=8,
                                                     drop_last=False)
     best_challenge_score = 100000
     print('Start training...')

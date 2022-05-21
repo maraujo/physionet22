@@ -15,10 +15,13 @@ def process_folder(commit="current"):
         print("Commit: {} Fold: {}".format(commit, fold))
         if RUN_TYPE == "docker":
             folder = "/physionet_data/challenge/files/cross-validation-data-1-0-3/{}/".format(fold)
-            os.system("docker run --rm --memory 12000mb -v {}model:/physionet/model -v {}/test:/physionet/test_data -v {}/test_outputs:/physionet/test_outputs/ -v {}/train/:/physionet/training_data image bash ./test_in_docker.bash".format(folder,folder,folder,folder))
+            os.system("docker run --rm --shm-size=512M -v {}model:/physionet/model -v {}/test:/physionet/test_data -v {}/test_outputs:/physionet/test_outputs/ -v {}/train/:/physionet/training_data image bash ./test_in_docker.bash".format(folder,folder,folder,folder))
         elif RUN_TYPE == "system":
             folder = "./"
-            os.system("bash test_code_quick.bash {}".format(fold))
+            os.system("python train_model.py /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/train model".format(fold))
+            os.system("python run_model.py model /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/test test_outputs".format(fold))
+            os.system("python evaluate_model.py /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/test test_outputs/ model".format(fold))
+
         murmur_script_path = folder + "model/murmur_result.csv"
         murmur_result = pd.read_csv(murmur_script_path)
         murmur_result["name"] = commit

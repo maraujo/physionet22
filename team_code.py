@@ -181,8 +181,8 @@ class ResNet1d(nn.Module):
 SEQ_LENGTH = 24576
 DEVICE = 'cpu'
 # DEVICE = 'cuda:0'
-EPOCHS = 5
-# EPOCHS = 160
+# EPOCHS = 5
+EPOCHS = 160
 
 # Model definition
 def _padding(downsample, kernel_size):

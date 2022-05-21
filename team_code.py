@@ -515,7 +515,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     train_dataloader = torch.utils.data.DataLoader(train_dataset,
                                                     batch_size=128,
                                                     shuffle=True,
-                                                    num_workers=8,
+                                                    num_workers=4,
                                                     drop_last=False)
     best_challenge_score = 100000
     print('Start training...')

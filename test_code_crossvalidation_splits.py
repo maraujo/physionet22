@@ -5,7 +5,7 @@ commits = []
 N_FOLDERS = 5
 murmur_results = []
 outcome_results = []
-RUN_TYPE = "docker" # docker or system
+RUN_TYPE = "system" # docker or system
 def process_folder(commit="current"):
     os.system("cp ../evaluate_model.py ./")
     os.system("cp ../test_in_docker.bash ./")
@@ -29,7 +29,7 @@ def process_folder(commit="current"):
         murmur_results.append(murmur_result.iloc[0])
         pd.DataFrame(murmur_results).to_csv("../murmur_final_result_{}.csv".format(commit))
         outcome_script_path = folder + "model/outcome_result.csv"
-        outcome_result = pd.read_csv(murmur_script_path)
+        outcome_result = pd.read_csv(outcome_script_path)
         outcome_result["name"] = commit
         outcome_result["fold"] = fold
         outcome_results.append(outcome_result.iloc[0])

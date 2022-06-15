@@ -9,6 +9,7 @@
 #
 ################################################################################
 
+from soundfile import SoundFile
 from helper_code import *
 import numpy as np, scipy as sp, scipy.stats, os, sys, joblib
 from sklearn.impute import SimpleImputer
@@ -17,14 +18,144 @@ from keras.models import load_model
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse 
 import urllib.request
+import tensorflow as tf
 
 from tqdm import tqdm
 from zipfile import ZipFile
 from loguru import logger
-from glob import glob
+import glob
 from autokeras.keras_layers import CastToFloat32
 from sklearn.preprocessing import OneHotEncoder
+from uuid import uuid4
 
+################################################################################
+#
+# Audio preprocessing
+#
+################################################################################
+
+import librosa
+import IPython.display as ipd
+from scipy.signal import butter, lfilter
+import os
+import soundfile as sf
+from pydub import AudioSegment
+from pydub.playback import play
+import sys
+import glob
+import librosa.display
+import math
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import PIL
+from tqdm.notebook import tqdm
+import json
+
+hop_length = 256
+REAL_SR = 4000
+FIGURE_SIZE = 3
+
+def butter_bandpass(lowcut, highcut, fs, order=5):
+    return butter(order, [lowcut, highcut], fs=fs, btype='band')
+
+def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
+    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
+    y = lfilter(b, a, data)
+    return y
+
+def clean_frequency_heartbeat(wavfile_path):
+  x, sr_fake = librosa.load(wavfile_path, sr=REAL_SR)
+  sr = REAL_SR
+  min_f = 20
+  max_f = 786 #Reference: https://bmcpediatr.biomedcentral.com/track/pdf/10.1186/1471-2431-7-23.pdf
+  y = butter_bandpass_filter(x, min_f, max_f, REAL_SR, order=3)
+  y = librosa.util.normalize(y)
+  sf.write(wavfile_path[:-len(".wav")] + "_clean.wav", y, REAL_SR, 'PCM_16')
+
+def increase_volume(path, level=3):
+  song = AudioSegment.from_wav(path)
+  # boost volume by 6dB
+  louder_song = song + level
+  	#save louder song 
+  louder_song.export(path, format='wav')
+
+def generate_mel_image(x, sr, hop_length=128):
+  total_duration = len(x)/sr 
+  fig, ax = plt.subplots(nrows=1, sharex=True, figsize=(FIGURE_SIZE,FIGURE_SIZE))
+  ax.axes.xaxis.set_visible(False)
+  ax.axes.yaxis.set_visible(False)
+  M = librosa.feature.melspectrogram(y=x, sr=sr, n_fft=256, hop_length=hop_length)
+  cmap = 'gist_ncar'
+  # cmap = "nipy_spectral"
+  sns.heatmap(pd.DataFrame(librosa.power_to_db(M, ref=np.max))[::-1], cmap=cmap, ax=ax, cbar=False)
+  plt.gca().set_axis_off()
+  plt.subplots_adjust(top = 1, bottom = 0, right = 1, left = 0, 
+              hspace = 0, wspace = 0)
+  plt.margins(0,0)
+  # ax.set_xlim([2, 4])
+  ax.set_frame_on(False)
+  fig.canvas.draw()
+  temp_canvas = fig.canvas
+  fig.clf()
+  plt.close()
+  pil_image = PIL.Image.frombytes('RGB', temp_canvas.get_width_height(),  temp_canvas.tostring_rgb())
+  return pil_image
+
+def generate_mel_wav_crops(filepath, output_folder, seconds_window=2):
+  # print(filepath)
+  x, sr_fake = librosa.load(filepath, sr=REAL_SR)
+  sr = REAL_SR
+  duration_seconds = len(x)/sr
+  for end_time in range(seconds_window, math.floor(duration_seconds), seconds_window):
+    # Crop sound
+    start_time = end_time - seconds_window
+    x_cut = x[start_time*sr: start_time*sr + seconds_window*sr]
+    output_filepath_prefix = output_folder.strip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
+    output_filepath_wav =  output_filepath_prefix + ".wav" 
+    output_filepath_image = output_filepath_prefix + ".png" 
+    # librosa.output.write_wav(filepath, x_cut, sr, norm=True)
+    # x_cut = librosa.util.normalize(x_cut)
+    pil_image = generate_mel_image(x_cut, sr, hop_length=32)
+    pil_image.save(output_filepath_image)
+    # sf.write(output_filepath_wav, x_cut, sr, 'PCM_16')
+    pil_image.close()
+    del x_cut
+    del pil_image
+  del x
+  del sr
+  # librosa.cache.clear()
+
+def generate_data_json_file(folder):
+  wavfiles = glob.glob(folder.strip("/") + os.path.sep + "*.wav")
+  datafiles = []
+  url_base = "http://algodev.matheusaraujo.com:8888/training_data/noise_annotations/"
+  for wavfile in wavfiles:
+    pngfile = os.path.sep.join(os.path.splitext(wavfile)[:-1]) + ".png"
+    datafiles.append({"data": {
+        "audio" : url_base + os.path.basename(wavfile),
+        "image" : url_base + os.path.basename(pngfile)
+    }})
+  output_pointer = open("datafiles.json", "w")
+  json.dump(datafiles, output_pointer)
+  output_pointer.close()
+
+def clean_frequency_folder(folder):
+  to_clean = glob.glob(folder + "/*_clean.wav")
+  for filepath in to_clean:
+    os.remove(filepath)
+  wav_files = glob.glob(folder + "/*.wav")
+  for wav_file in tqdm(wav_files):
+    clean_frequency_heartbeat(wav_file)
+
+if __name__=="__main__":
+  folder = sys.argv[1]
+  wav_files = glob.glob(folder + "*.wav")
+  for wav_file in wav_files:
+    clean_frequency_heartbeat(wav_file)
+    increase_volume(wav_file)
 
 ################################################################################
 #
@@ -139,7 +270,7 @@ def load_pretrained_model(model_dir, model_type):
     with ZipFile(destiny_zip, 'r') as zipObj:
     # Extract all the contents of zip file in current directory
         zipObj.extractall(destiny_model)
-    keras_model_folder_to_load = glob(destiny_model + os.path.sep + "*")[0]
+    keras_model_folder_to_load = glob.glob(destiny_model + os.path.sep + "*")[0]
     return load_model(keras_model_folder_to_load, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     
 
@@ -151,85 +282,88 @@ def train_challenge_model(data_folder, model_folder, verbose):
     
     if LOAD_TRAINED_MODELS:
         noise_model = load_pretrained_model(model_folder, "noise")
+        logger.info(noise_model.summary())
         murmur_model = load_pretrained_model(model_folder, "murmur")
+        logger.info(murmur_model.summary())
         murmur_decision_model = load_pretrained_model(model_folder, "murmur_decision")
+        logger.info(murmur_decision_model.summary())
     
-    import ipdb;ipdb.set_trace()
-    pass
+    # import ipdb;ipdb.set_trace()
+    # pass
     
-    # Find data files.
-    if verbose >= 1:
-        print('Finding data files...')
+    # # Find data files.
+    # if verbose >= 1:
+    #     print('Finding data files...')
 
-    # Find the patient data files.
-    patient_files = find_patient_files(data_folder)
-    num_patient_files = len(patient_files)
+    # # Find the patient data files.
+    # patient_files = find_patient_files(data_folder)
+    # num_patient_files = len(patient_files)
 
-    if num_patient_files==0:
-        raise Exception('No data was provided.')
+    # if num_patient_files==0:
+    #     raise Exception('No data was provided.')
 
     
 
-    # Extract the features and labels.
-    if verbose >= 1:
-        print('Extracting features and labels from the Challenge data...')
+    # # Extract the features and labels.
+    # if verbose >= 1:
+    #     print('Extracting features and labels from the Challenge data...')
 
-    murmur_classes = ['Present', 'Unknown', 'Absent']
-    num_murmur_classes = len(murmur_classes)
-    outcome_classes = ['Abnormal', 'Normal']
-    num_outcome_classes = len(outcome_classes)
+    # murmur_classes = ['Present', 'Unknown', 'Absent']
+    # num_murmur_classes = len(murmur_classes)
+    # outcome_classes = ['Abnormal', 'Normal']
+    # num_outcome_classes = len(outcome_classes)
 
-    features = list()
-    murmurs = list()
-    outcomes = list()
+    # features = list()
+    # murmurs = list()
+    # outcomes = list()
 
-    for i in range(num_patient_files):
-        if verbose >= 2:
-            print('    {}/{}...'.format(i+1, num_patient_files))
+    # for i in range(num_patient_files):
+    #     if verbose >= 2:
+    #         print('    {}/{}...'.format(i+1, num_patient_files))
 
-        # Load the current patient data and recordings.
-        current_patient_data = load_patient_data(patient_files[i])
-        current_recordings = load_recordings(data_folder, current_patient_data)
+    #     # Load the current patient data and recordings.
+    #     current_patient_data = load_patient_data(patient_files[i])
+    #     current_recordings = load_recordings(data_folder, current_patient_data)
 
-        # Extract features.
-        current_features = get_features(current_patient_data, current_recordings)
-        features.append(current_features)
+    #     # Extract features.
+    #     current_features = get_features(current_patient_data, current_recordings)
+    #     features.append(current_features)
 
-        # Extract labels and use one-hot encoding.
-        current_murmur = np.zeros(num_murmur_classes, dtype=int)
-        murmur = get_murmur(current_patient_data)
-        if murmur in murmur_classes:
-            j = murmur_classes.index(murmur)
-            current_murmur[j] = 1
-        murmurs.append(current_murmur)
+    #     # Extract labels and use one-hot encoding.
+    #     current_murmur = np.zeros(num_murmur_classes, dtype=int)
+    #     murmur = get_murmur(current_patient_data)
+    #     if murmur in murmur_classes:
+    #         j = murmur_classes.index(murmur)
+    #         current_murmur[j] = 1
+    #     murmurs.append(current_murmur)
 
-        current_outcome = np.zeros(num_outcome_classes, dtype=int)
-        outcome = get_outcome(current_patient_data)
-        if outcome in outcome_classes:
-            j = outcome_classes.index(outcome)
-            current_outcome[j] = 1
-        outcomes.append(current_outcome)
+    #     current_outcome = np.zeros(num_outcome_classes, dtype=int)
+    #     outcome = get_outcome(current_patient_data)
+    #     if outcome in outcome_classes:
+    #         j = outcome_classes.index(outcome)
+    #         current_outcome[j] = 1
+    #     outcomes.append(current_outcome)
 
-    features = np.vstack(features)
-    murmurs = np.vstack(murmurs)
-    outcomes = np.vstack(outcomes)
+    # features = np.vstack(features)
+    # murmurs = np.vstack(murmurs)
+    # outcomes = np.vstack(outcomes)
 
-    # Train the model.
-    if verbose >= 1:
-        print('Training model...')
+    # # Train the model.
+    # if verbose >= 1:
+    #     print('Training model...')
 
-    # Define parameters for random forest classifier.
-    n_estimators   = 123  # Number of trees in the forest.
-    max_leaf_nodes = 45   # Maximum number of leaf nodes in each tree.
-    random_state   = 6789 # Random state; set for reproducibility.
+    # # Define parameters for random forest classifier.
+    # n_estimators   = 123  # Number of trees in the forest.
+    # max_leaf_nodes = 45   # Maximum number of leaf nodes in each tree.
+    # random_state   = 6789 # Random state; set for reproducibility.
 
-    imputer = SimpleImputer().fit(features)
-    features = imputer.transform(features)
-    murmur_classifier = RandomForestClassifier(n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(features, murmurs)
-    outcome_classifier = RandomForestClassifier(n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(features, outcomes)
+    # imputer = SimpleImputer().fit(features)
+    # features = imputer.transform(features)
+    # murmur_classifier = RandomForestClassifier(n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(features, murmurs)
+    # outcome_classifier = RandomForestClassifier(n_estimators=n_estimators, max_leaf_nodes=max_leaf_nodes, random_state=random_state).fit(features, outcomes)
 
-    # Save the model.
-    save_challenge_model(model_folder, imputer, murmur_classes, murmur_classifier, outcome_classes, outcome_classifier)
+    # # Save the model.
+    save_challenge_model(model_folder, noise_model, murmur_model, murmur_decision_model)
 
     if verbose >= 1:
         print('Done.')
@@ -237,43 +371,126 @@ def train_challenge_model(data_folder, model_folder, verbose):
 # Load your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def load_challenge_model(model_folder, verbose):
-    filename = os.path.join(model_folder, 'model.sav')
-    return joblib.load(filename)
+    noise_model = load_model(os.path.join(model_folder, 'noise_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+    murmur_model = load_model(os.path.join(model_folder, 'murmur_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+    murmur_decision_model = load_model(os.path.join(model_folder, 'murmur_decision_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+    return {"noise_model" : noise_model, "murmur_model" : murmur_model, "murmur_decision_model": murmur_decision_model}
 
+def get_unique_name():
+    return str(uuid4())
+
+AUX_FOLDER = "recordings_aux"
+AUX_IMGS_FOLDER = "images_aux"
+def process_recordings(recording):
+    recording_name = get_unique_name()
+    
 # Run your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def run_challenge_model(model, data, recordings, verbose):
-    imputer = model['imputer']
-    murmur_classes = model['murmur_classes']
-    murmur_classifier = model['murmur_classifier']
-    outcome_classes = model['outcome_classes']
-    outcome_classifier = model['outcome_classifier']
+    murmur_classes = ['Present', 'Unknown', 'Absent']
+    num_murmur_classes = len(murmur_classes)
+    outcome_classes = ['Abnormal', 'Normal']
+    num_outcome_classes = len(outcome_classes)
+    
+    os.makedirs(AUX_FOLDER, exist_ok=True)
+    os.makedirs(AUX_IMGS_FOLDER, exist_ok=True)
+    
+    if os.path.exists(AUX_FOLDER):
+        files = glob.glob(os.path.join(AUX_FOLDER, "*"))
+        for filepath in files:
+            os.remove(filepath)
+    
+    if os.path.exists(AUX_IMGS_FOLDER):
+        files = glob.glob(os.path.join(AUX_IMGS_FOLDER, "*"))
+        for filepath in files:
+            os.remove(filepath)
+    
+    for recording in recordings:
+        recording = recording / 2 ** (16 - 1) # Normalize as: https://stackoverflow.com/questions/50062358/difference-between-load-of-librosa-and-read-of-scipy-io-wavfile
+        recording_name = get_unique_name()
+        filename =  os.path.join(AUX_FOLDER, recording_name) + ".wav"
+        with SoundFile(filename, 'w', REAL_SR, 1, 'PCM_16') as f:
+            f.write(np.array(recording).astype(float))
+            f.flush()
+            f.close()
+        logger.info("File saved: {}".format(filename))
+    clean_frequency_folder(AUX_FOLDER)
+    clean_files = glob.glob(os.path.join(AUX_FOLDER, "*_clean.wav"))
+    for clean_file in clean_files:
+        generate_mel_wav_crops(clean_file, AUX_IMGS_FOLDER)
 
-    # Load features.
-    features = get_features(data, recordings)
-
-    # Impute missing data.
-    features = features.reshape(1, -1)
-    features = imputer.transform(features)
-
-    # Get classifier probabilities.
-    murmur_probabilities = murmur_classifier.predict_proba(features)
-    murmur_probabilities = np.asarray(murmur_probabilities, dtype=np.float32)[:, 0, 1]
-    outcome_probabilities = outcome_classifier.predict_proba(features)
-    outcome_probabilities = np.asarray(outcome_probabilities, dtype=np.float32)[:, 0, 1]
-
-    # Choose label with highest probability.
-    murmur_labels = np.zeros(len(murmur_classes), dtype=np.int_)
-    idx = np.argmax(murmur_probabilities)
-    murmur_labels[idx] = 1
-    outcome_labels = np.zeros(len(outcome_classes), dtype=np.int_)
-    idx = np.argmax(outcome_probabilities)
-    outcome_labels[idx] = 1
-
-    # Concatenate classes, labels, and probabilities.
+    imgs_to_filter = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=(108, 108))
+    imgs_noise_prediction = model["noise_model"].predict(imgs_to_filter)
+    imgs_noise_df = pd.DataFrame({"imgs_path":imgs_to_filter.file_paths, "noise_prob" : imgs_noise_prediction.flatten()})
+    imgs_clean = imgs_noise_df[imgs_noise_df["noise_prob"] < 0.5]
+    imgs_noisy = imgs_noise_df[~imgs_noise_df["imgs_path"].isin(imgs_clean["imgs_path"])]
+    if imgs_clean.shape[0] == 0:
+        logger.info("No clean sound. By default abnormal.")
+        labels = [1,0,0] + [1, 0]
+        probabilities = [1,0,0] + [1, 0]
+        classes = murmur_classes + outcome_classes
+        return classes, labels, probabilities
+    
+    # Delete noisy imgs    
+    imgs_noisy["imgs_path"].apply(lambda x: os.remove(x))
+    
+    # Get murmur embeddings
+    murmur_embeddings_model = tf.keras.models.Sequential(model["murmur_model"].layers[:-2])
+    imgs_to_emb = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=(72, 72))
+    predictions = murmur_embeddings_model.predict(imgs_to_emb)
+    embs_df = pd.DataFrame(predictions).sample(frac=1, random_state=42)
+    SAMPLE_NUMBERS = 15
+    if embs_df.shape[0] < SAMPLE_NUMBERS:
+        embs_df = embs_df.sample(SAMPLE_NUMBERS, replace=True, random_state=42)
+    else:
+        embs_df = embs_df.head(SAMPLE_NUMBERS)
+    
+    prediction = model["murmur_decision_model"].predict(embs_df.values.flatten().reshape(1,-1))
+    present_prob = prediction[0][0]
+    absent_prob = 1 - present_prob
+    
+    murmur_probabilities = np.array([absent_prob, 0, present_prob])
+    outcome_probabilities = np.array([absent_prob, present_prob])
+    probabilities = np.concatenate([murmur_probabilities, outcome_probabilities])
+    
+    murmur_labels = murmur_probabilities > 0.5
+    outcome_labels = outcome_probabilities > 0.5
+    labels = np.concatenate([murmur_labels, outcome_labels])
     classes = murmur_classes + outcome_classes
-    labels = np.concatenate((murmur_labels, outcome_labels))
-    probabilities = np.concatenate((murmur_probabilities, outcome_probabilities))
+    # import ipdb;ipdb.set_trace()
+    # pass
+
+    # imputer = model['imputer']
+    # murmur_classes = model['murmur_classes']
+    # murmur_classifier = model['murmur_classifier']
+    # outcome_classes = model['outcome_classes']
+    # outcome_classifier = model['outcome_classifier']
+
+    # # Load features.
+    # features = get_features(data, recordings)
+
+    # # Impute missing data.
+    # features = features.reshape(1, -1)
+    # features = imputer.transform(features)
+
+    # # Get classifier probabilities.
+    # murmur_probabilities = murmur_classifier.predict_proba(features)
+    # murmur_probabilities = np.asarray(murmur_probabilities, dtype=np.float32)[:, 0, 1]
+    # outcome_probabilities = outcome_classifier.predict_proba(features)
+    # outcome_probabilities = np.asarray(outcome_probabilities, dtype=np.float32)[:, 0, 1]
+
+    # # Choose label with highest probability.
+    # murmur_labels = np.zeros(len(murmur_classes), dtype=np.int_)
+    # idx = np.argmax(murmur_probabilities)
+    # murmur_labels[idx] = 1
+    # outcome_labels = np.zeros(len(outcome_classes), dtype=np.int_)
+    # idx = np.argmax(outcome_probabilities)
+    # outcome_labels[idx] = 1
+
+    # # Concatenate classes, labels, and probabilities.
+    # classes = murmur_classes + outcome_classes
+    # labels = np.concatenate((murmur_labels, outcome_labels))
+    # probabilities = np.concatenate((murmur_probabilities, outcome_probabilities))
 
     return classes, labels, probabilities
 
@@ -284,10 +501,11 @@ def run_challenge_model(model, data, recordings, verbose):
 ################################################################################
 
 # Save your trained model.
-def save_challenge_model(model_folder, imputer, murmur_classes, murmur_classifier, outcome_classes, outcome_classifier):
-    d = {'imputer': imputer, 'murmur_classes': murmur_classes, 'murmur_classifier': murmur_classifier, 'outcome_classes': outcome_classes, 'outcome_classifier': outcome_classifier}
-    filename = os.path.join(model_folder, 'model.sav')
-    joblib.dump(d, filename, protocol=0)
+def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decision_model):
+    noise_model.save(os.path.join(model_folder, "noise_model.h5"))
+    murmur_model.save(os.path.join(model_folder, "murmur_model.h5"))
+    murmur_decision_model.save(os.path.join(model_folder, "murmur_decision_model.h5"))
+    
 
 # Extract features from the data.
 def get_features(data, recordings):

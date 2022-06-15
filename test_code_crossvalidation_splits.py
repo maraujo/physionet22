@@ -18,6 +18,8 @@ def process_folder(commit="current"):
             os.system("docker run --rm --shm-size=512M -v {}model:/physionet/model -v {}/test:/physionet/test_data -v {}/test_outputs:/physionet/test_outputs/ -v {}/train/:/physionet/training_data image bash ./test_in_docker.bash".format(folder,folder,folder,folder))
         elif RUN_TYPE == "system":
             folder = "./"
+            os.system("rm -r test_outputs")
+            os.system("rm -r model")
             os.system("python train_model.py /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/train model".format(fold))
             os.system("python run_model.py model /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/test test_outputs".format(fold))
             os.system("python evaluate_model.py /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/test test_outputs/ model".format(fold))

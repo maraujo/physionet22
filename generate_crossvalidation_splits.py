@@ -33,7 +33,7 @@ if __name__ == "__main__":
             "id" : patient_id,
             "label" : patient_label 
         })
-    patient_info_df = pd.DataFrame(patient_infos).sample(5)
+    patient_info_df = pd.DataFrame(patient_infos).sample(20, random_state=42)
     
     print("Training Set")
     print("Number of patients : ", patient_info_df.iloc[0])

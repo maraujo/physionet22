@@ -108,7 +108,7 @@ train_embs_negative_folder = train_embs_folder_murmur + os.path.sep + "negative"
 
 
 LOAD_TRAINED_MODELS = True
-TRAIN_NOISE_DETECTION = False
+TRAIN_NOISE_DETECTION = True
 
 NOISE_IMAGE_SIZE = (64, 64)
 RESHUFFLE_PATIENT_EMBS_N = 5

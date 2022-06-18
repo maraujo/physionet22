@@ -8,7 +8,11 @@ import shutil
 
 N_FOLDERS = 10
 INPUT_FOLDER = "/physionet_data/challenge/files/circor-heart-sound/1.0.3/training_data/"
-OUTPUT_FOLDER = "/physionet_data/challenge/files/cross-validation-data-1-0-3-mini/"
+IS_MINI = False
+if IS_MINI:
+    OUTPUT_FOLDER = "/physionet_data/challenge/files/cross-validation-data-1-0-3-mini/"
+else:
+    OUTPUT_FOLDER = "/physionet_data/challenge/files/cross-validation-data-1-0-3/"
 seed = 42
     
 def create_folder_and_move(patient_infos, dst_folder):
@@ -33,7 +37,10 @@ if __name__ == "__main__":
             "id" : patient_id,
             "label" : patient_label 
         })
-    patient_info_df = pd.DataFrame(patient_infos).sample(20, random_state=42)
+    if IS_MINI:
+        patient_info_df = pd.DataFrame(patient_infos).sample(20, random_state=42)
+    else:
+        patient_info_df = pd.DataFrame(patient_infos).sample(frac=1, random_state=42)
     
     print("Training Set")
     print("Number of patients : ", patient_info_df.iloc[0])

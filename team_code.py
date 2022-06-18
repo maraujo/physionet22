@@ -667,7 +667,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
         noise_model_new.add(tf.keras.layers.Dropout(.2))
         noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(NOISE_IMAGE_SIZE[0], NOISE_IMAGE_SIZE[1], 3)))
         noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
-        noise_model_new.add(tf.keras.layers.Dropout(.2))
         noise_model_new.add(tf.keras.layers.Flatten())
         noise_model_new.add(tf.keras.layers.Dropout(.5))
         noise_model_new.add(tf.keras.layers.Dense(EMBS_SIZE, activation='relu'))

@@ -616,19 +616,22 @@ def train_challenge_model(data_folder, model_folder, verbose):
     os.system("tar -xf noise_detection_sandbox.tar.gz -C {}".format(NOISE_DETECTION_WORKING_DIR))
 
     if LOAD_TRAINED_MODELS:
-        # noise_model = load_pretrained_model(model_folder, "noise")
-        logger.info("Loading model: {}".format("noises"))
-        noise_model = load_model(os.path.join(model_folder, "noise_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-        logger.info(noise_model.summary())
-        murmur_model = load_model(os.path.join(model_folder, "murmur_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-        # murmur_model = load_pretrained_model(model_folder, "murmur")
-        logger.info(murmur_model.summary())
-        murmur_decision_model = load_model(os.path.join(model_folder, "murmur_decision.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-        # murmur_decision_model = load_pretrained_model(model_folder, "murmur_decision")
-        logger.info(murmur_decision_model.summary())
-        save_challenge_model(model_folder, noise_model, murmur_model, murmur_decision_model)
-        if verbose >= 1:
-            print('Done.')
+        try:
+            # noise_model = load_pretrained_model(model_folder, "noise")
+            logger.info("Loading model: {}".format("noises"))
+            noise_model = load_model(os.path.join(model_folder, "noise_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+            logger.info(noise_model.summary())
+            murmur_model = load_model(os.path.join(model_folder, "murmur_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+            # murmur_model = load_pretrained_model(model_folder, "murmur")
+            logger.info(murmur_model.summary())
+            murmur_decision_model = load_model(os.path.join(model_folder, "murmur_decision.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+            # murmur_decision_model = load_pretrained_model(model_folder, "murmur_decision")
+            logger.info(murmur_decision_model.summary())
+            # save_challenge_model(model_folder, noise_model, murmur_model, murmur_decision_model)
+            if verbose >= 1:
+                print('Done.')
+        except OSError:
+            pass
 
     else:
         pass

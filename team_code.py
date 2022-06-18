@@ -59,7 +59,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import PIL
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 import json
 from keras.engine.functional import Functional
 import tensorflow_addons as tfa
@@ -67,6 +67,33 @@ import tensorflow_addons as tfa
 hop_length = 256
 REAL_SR = 4000
 FIGURE_SIZE = 3
+train_folder_murmur = "train_folder_murmur"
+test_folder_murmur = "test_folder_murmur"
+val_folder_murmur = "val_folder_murmur"
+
+val_positive_folder = val_folder_murmur + os.path.sep + "positive"
+val_negative_folder = val_folder_murmur + os.path.sep + "negative"
+test_positive_folder = test_folder_murmur + os.path.sep + "positive"
+test_negative_folder = test_folder_murmur + os.path.sep + "negative"
+train_positive_folder = train_folder_murmur + os.path.sep + "positive"
+train_negative_folder = train_folder_murmur + os.path.sep + "negative"
+
+train_outcome_folder = "train_outcome_folder"
+test_outcome_folder = "test_outcome_folder"
+val_outcome_folder = "val_outcome_folder"
+val_outcome_positive_folder = val_outcome_folder + os.path.sep + "positive"
+val_outcome_negative_folder = val_outcome_folder + os.path.sep + "negative"
+test_outcome_positive_folder = test_outcome_folder + os.path.sep + "positive"
+test_outcome_negative_folder = test_outcome_folder + os.path.sep + "negative"
+train_outcome_positive_folder = train_outcome_folder + os.path.sep + "positive"
+train_outcome_negative_folder = train_outcome_folder + os.path.sep + "negative"
+LOAD_TRAINED_MODELS = True
+TRAIN_NOISE_DETECTION = False
+
+NOISE_IMAGE_SIZE = (64, 64)
+MURMUR_IMAGE_SIZE = (72, 72)
+
+
 
 def butter_bandpass(lowcut, highcut, fs, order=5):
     return butter(order, [lowcut, highcut], fs=fs, btype='band')
@@ -114,7 +141,7 @@ def generate_mel_image(x, sr, hop_length=128):
   pil_image = PIL.Image.frombytes('RGB', temp_canvas.get_width_height(),  temp_canvas.tostring_rgb())
   return pil_image
 
-def generate_mel_wav_crops(filepath, output_folder, patients_file_informations_df = None, seconds_window=2):
+def generate_mel_wav_crops(filepath, output_folder, seconds_window=2):
   # print(filepath)
   x, sr_fake = librosa.load(filepath, sr=REAL_SR)
   sr = REAL_SR
@@ -124,31 +151,12 @@ def generate_mel_wav_crops(filepath, output_folder, patients_file_informations_d
     start_time = end_time - seconds_window
     x_cut = x[start_time*sr: start_time*sr + seconds_window*sr]
     pil_image = generate_mel_image(x_cut, sr, hop_length=32)
-    if type(patients_file_informations_df) == pd.DataFrame:
-        output_filepath_prefix = os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
-        file_prefix = os.path.basename(filepath).split("_clean")[0]
-        file_info = patients_file_informations_df[patients_file_informations_df['file_prefix'] == file_prefix].iloc[0]
-        if file_info["murmur"] == "Present":
-            output_filepath = os.path.join(output_folder.strip("/"), "positive", output_filepath_prefix) + ".png"
-            if file_info["is_murmur_location"]:
-                pil_image.save(output_filepath)
-            else:
-                #skip 
-                pass
-        if file_info["murmur"] == "Absent":
-            # save
-            output_filepath = os.path.join(output_folder.strip("/"), "negative", output_filepath_prefix) + ".png"
-            pil_image.save(output_filepath)
-        if file_info["murmur"] == "Unknown":
-            #skip 
-            pass
-    else:
-        output_filepath_prefix = output_folder.strip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
-        output_filepath_wav =  output_filepath_prefix + ".wav" 
-        output_filepath_image = output_filepath_prefix + ".png" 
-        # librosa.output.write_wav(filepath, x_cut, sr, norm=True)
-        # x_cut = librosa.util.normalize(x_cut)
-        pil_image.save(output_filepath_image)
+    output_filepath_prefix = output_folder.strip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
+    output_filepath_wav =  output_filepath_prefix + ".wav" 
+    output_filepath_image = output_filepath_prefix + ".png" 
+    # librosa.output.write_wav(filepath, x_cut, sr, norm=True)
+    # x_cut = librosa.util.normalize(x_cut)
+    pil_image.save(output_filepath_image)
     
     # sf.write(output_filepath_wav, x_cut, sr, 'PCM_16')
     pil_image.close()
@@ -192,8 +200,6 @@ if __name__=="__main__":
 # Required functions. Edit these functions to add your code, but do not change the arguments.
 #
 ################################################################################
-LOAD_TRAINED_MODELS = True
-TRAIN_NOISE_DETECTION = False
 
 
 class DownloadProgressBar(tqdm):
@@ -330,9 +336,6 @@ def get_all_metrics():
     all_metrics = [AUC_metric, FN_metric, FP_metric, ACC_metric, PRECISION_metric, RECALL_metric, AUC_ROC_metric]
     return all_metrics
 
-NOISE_IMAGE_SIZE = (64, 64)
-MURMUR_IMAGE_SIZE = (72, 72)
-
 # Load recordings.
 def load_recordings_custom(data_folder, data, get_frequencies=False):
     num_locations = get_num_locations(data)
@@ -370,17 +373,95 @@ def get_murmur_locations(data):
                 pass
     raise Exception("No murmur location found.")
 
+def clean_current_path():
+    shutil.rmtree("recordings_aux", ignore_errors=True)
+    shutil.rmtree("image_aux", ignore_errors=True)
+    shutil.rmtree("train_murmur_folder", ignore_errors=True)
+    shutil.rmtree("test_murmur_folder", ignore_errors=True)
+    shutil.rmtree("val_murmur_folder", ignore_errors=True)
+    shutil.rmtree("train_outcome_folder", ignore_errors=True)
+    shutil.rmtree("test_outcome_folder", ignore_errors=True)
+    shutil.rmtree("val_outcome_folder", ignore_errors=True)
+
+def prepare_train_val_test_murmur_folders():    
+    shutil.rmtree(train_folder_murmur, ignore_errors=True)
+    shutil.rmtree(val_folder_murmur, ignore_errors=True)
+    shutil.rmtree(test_folder_murmur, ignore_errors=True)
+    shutil.rmtree(train_outcome_folder, ignore_errors=True)
+    shutil.rmtree(test_outcome_folder, ignore_errors=True)
+    shutil.rmtree(val_outcome_folder, ignore_errors=True)
+    
+    
+    if not os.path.exists(train_folder_murmur):
+        os.mkdir(train_folder_murmur)
+        os.mkdir(train_positive_folder)
+        os.mkdir(train_negative_folder)
+
+    if not os.path.exists(val_folder_murmur):
+        os.mkdir(val_folder_murmur)
+        os.mkdir(val_positive_folder)
+        os.mkdir(val_negative_folder)
+
+    if not os.path.exists(test_folder_murmur):
+        os.mkdir(test_folder_murmur)
+        os.mkdir(test_positive_folder)
+        os.mkdir(test_negative_folder)
+
+    if not os.path.exists(train_outcome_folder):
+        os.mkdir(train_outcome_folder)
+        os.mkdir(train_outcome_positive_folder)
+        os.mkdir(train_outcome_negative_folder)
+
+    if not os.path.exists(val_outcome_folder):
+        os.mkdir(val_outcome_folder)
+        os.mkdir(val_outcome_positive_folder)
+        os.mkdir(val_outcome_negative_folder)
+
+    if not os.path.exists(test_outcome_folder):
+        os.mkdir(test_outcome_folder)
+        os.mkdir(test_outcome_positive_folder)
+        os.mkdir(test_outcome_negative_folder)
+
+def load_image_array(filepath):
+  image = tf.keras.preprocessing.image.load_img(filepath, target_size=(model_murmur_width, model_murmur_height))
+  input_arr = tf.keras.preprocessing.image.img_to_array(image)
+  input_arr = np.array([input_arr])  # Convert single image to a batch.
+  return input_arr
+
+def generate_patient_embeddings_folder(row_patient, murmur_model):
+    EMBDS_PER_PATIENTS = 15
+    patient_id = row_patient["patient"]
+    split = row_patient["split"]
+    label = row_patient["label"]
+    destiny_folder = "patient_embeddings" + os.path.sep + split + os.path.sep + label
+    original_files_query = split + "_folder_murmur" + os.path.sep + label + os.path.sep + patient_id + "*"
+    patient_files = glob.glob(original_files_query)
+    embs = []
+    for patient_file in patient_files:
+        img_array = load_image_array(patient_file)
+        prediction = murmur_model.predict(img_array)
+        embs.append(prediction[0])
+    embs = np.array(embs)
+    embs_df = pd.DataFrame(embs).sample(frac=1, random_state=42)
+    # We lose potential embds here, fix later
+    if embs_df.shape[0] < EMBDS_PER_PATIENTS:
+        embs_df = embs_df.sample(EMBDS_PER_PATIENTS, replace=True, random_state=42)
+    else:
+        embs_df = embs_df.head(EMBDS_PER_PATIENTS)
+    destiny_file = destiny_folder + os.path.sep + patient_id
+    embs_df.to_pickle(destiny_file)
+    logger.info("Saved: " + destiny_file)
+    
+    
+
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
     AUX_FOLDER = "recordings_aux"
     AUX_IMGS_FOLDER = "images_aux"
     AUX_IMGS_POSITIVE_FOLDER = os.path.join(AUX_IMGS_FOLDER, "positive")
     AUX_IMGS_NEGATIVE_FOLDER = os.path.join(AUX_IMGS_FOLDER, "negative")
-    
-    # clean_folder(AUX_FOLDER)
-    # clean_folder(AUX_IMGS_FOLDER)
-    # clean_folder(AUX_IMGS_POSITIVE_FOLDER)
-    # clean_folder(AUX_IMGS_NEGATIVE_FOLDER)
+    murmur_image_folders = [train_positive_folder, train_negative_folder, val_positive_folder, val_negative_folder, test_positive_folder, test_negative_folder]
+    # clean_current_path()
     
     os.makedirs(AUX_FOLDER, exist_ok=True)
     os.makedirs(AUX_IMGS_FOLDER, exist_ok=True)
@@ -395,7 +476,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     os.system("tar -xf noise_detection_sandbox.tar.gz -C {}".format(NOISE_DETECTION_WORKING_DIR))
 
     if LOAD_TRAINED_MODELS:
-        noise_model = load_pretrained_model(model_folder, "noise")
+        # noise_model = load_pretrained_model(model_folder, "noise")
+        logger.info("Loading model: {}".format("noises"))
+        noise_model = load_model(os.path.join(model_folder, "noise_model.tf"))
         logger.info(noise_model.summary())
         murmur_model = load_pretrained_model(model_folder, "murmur")
         logger.info(murmur_model.summary())
@@ -472,6 +555,16 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
         logger.info("Noise Model Classification Report")
         logger.info(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True))
+        tf.keras.models.save_model(
+            noise_model_new,
+            os.path.join(model_folder, 'noise_model.tf'),
+            overwrite=True,
+            include_optimizer=True,
+            save_format="tf",
+            signatures=None,
+            options=None,
+            save_traces=True
+        )
     else:
         noise_model_new = noise_model
     
@@ -534,12 +627,25 @@ def train_challenge_model(data_folder, model_folder, verbose):
     outcomes = list()
     
     patients_file_informations = []
-
+    patient_ids = []
+    for i in tqdm(range(num_patient_files)):
+        # Load the current patient data and recordings.
+        current_patient_data = load_patient_data(patient_files[i])
+        patient_id = get_patient_id(current_patient_data)
+        patient_ids.append(patient_id)
+    
+    unique_original_files = pd.Series(pd.Series(patient_ids).unique())
+    test_set = unique_original_files.sample(frac=0.2, random_state=42)
+    train_val_set = unique_original_files[~unique_original_files.isin(test_set)]
+    train_set = train_val_set.sample(frac=0.8, random_state=42)
+    val_set = train_val_set[~train_val_set.isin(train_set)]
+    
     for i in tqdm(range(num_patient_files)):
     #     # Load the current patient data and recordings.
         current_patient_data = load_patient_data(patient_files[i])
         current_recordings, locations = load_recordings_custom(data_folder, current_patient_data)
         murmur_locations = get_murmur_locations(current_patient_data)
+        patient_id = get_patient_id(current_patient_data)
         
         for recording, location in zip(current_recordings, locations):
             recording = recording / 2 ** (16 - 1) # Normalize as: https://stackoverflow.com/questions/50062358/difference-between-load-of-librosa-and-read-of-scipy-io-wavfile
@@ -549,7 +655,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 "murmur" : get_murmur(current_patient_data),
                 "outcome" : get_outcome(current_patient_data),
                 "murmur_locations" : murmur_locations,
-                "location" : location
+                "location" : location,
+                "patient_id" : patient_id
             })
             filename = os.path.join(AUX_FOLDER, recording_name) + ".wav"
             with SoundFile(filename, 'w', REAL_SR, 1, 'PCM_16') as f:
@@ -562,44 +669,79 @@ def train_challenge_model(data_folder, model_folder, verbose):
     clean_frequency_folder(AUX_FOLDER)
     clean_files = glob.glob(os.path.join(AUX_FOLDER, "*_clean.wav"))
     logger.info("Generating melspectograms crops")
-    for clean_file in tqdm(clean_files, total = len(clean_files), miniters=0):
-        generate_mel_wav_crops(clean_file, AUX_IMGS_FOLDER, patients_file_informations_df)
+    
+    prepare_train_val_test_murmur_folders()
+    
+    for clean_file in tqdm(clean_files): 
+        file_prefix = os.path.basename(clean_file).split("_clean")[0]
+        file_info = patients_file_informations_df[patients_file_informations_df['file_prefix'] == file_prefix].iloc[0]
+        if file_info["murmur"] == "Unknown":
+            continue
+        if file_info["murmur"] == "Present" and file_info["is_murmur_location"]:
+            if file_info["patient_id"] in train_set.values:
+                destiny_folder = train_positive_folder
+            if file_info["patient_id"] in val_set.values:
+                destiny_folder = val_positive_folder
+            if file_info["patient_id"] in test_set.values:
+                destiny_folder = test_positive_folder
+        if file_info["murmur"] == "Absent":
+            if file_info["patient_id"] in train_set.values:
+                destiny_folder = train_negative_folder
+            if file_info["patient_id"] in val_set.values:
+                destiny_folder = val_negative_folder
+            if file_info["patient_id"] in test_set.values:
+                destiny_folder = test_negative_folder             
+        generate_mel_wav_crops(clean_file, destiny_folder)
 
     # Clean imgs with noise prediction
-    positive_noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_POSITIVE_FOLDER, label_mode = None, image_size=(108,108), shuffle=False)
-    positive_predictions = noise_model.predict(positive_noise_detection_dataset_train_val)
-    positive_files_noise = pd.DataFrame({"predictions" : positive_predictions.flatten(), "filepath" : positive_noise_detection_dataset_train_val.file_paths})    
-    negative_noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_NEGATIVE_FOLDER, label_mode = None, image_size=(108,108), shuffle=False)
-    negative_predictions = noise_model.predict(negative_noise_detection_dataset_train_val)
-    negative_files_noise = pd.DataFrame({"predictions" : negative_predictions.flatten(), "filepath" : negative_noise_detection_dataset_train_val.file_paths})
-    files_to_exclude = positive_files_noise[positive_files_noise["predictions"] > 0.5].append(negative_files_noise[negative_files_noise["predictions"] > 0.5])
+    
+    noise_murmur_df_list = []
+    for folder in murmur_image_folders:
+        noise_detection_dataset = tf.keras.utils.image_dataset_from_directory(folder, label_mode = None, image_size=NOISE_IMAGE_SIZE, shuffle=False)
+        predictions = noise_model.predict(noise_detection_dataset)
+        noise_murmur_df_list.append(pd.DataFrame({"predictions" : predictions.flatten(), "filepath" : noise_detection_dataset.file_paths}))
+    noise_murmur_df = pd.concat(noise_murmur_df_list)        
+
+    files_to_exclude = noise_murmur_df[noise_murmur_df["predictions"] > 0.5]
     logger.info("Remove noisy files")
     if files_to_exclude.shape[0] > 0:
         for filepath in tqdm(files_to_exclude["filepath"]):
             os.remove(filepath)
     
-    
-    
     class_weight = {0: 1, 1: 1.5}  
     batch_size = 16
-    murmur_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, subset="training", validation_split=0.2, batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE )
-    dataset_size = len(murmur_detection_dataset_train_val)
-    murmur_detection_dataset_train_val = murmur_detection_dataset_train_val.shuffle(buffer_size=dataset_size)
-    murmur_detection_dataset_train = murmur_detection_dataset_train_val.take(int(dataset_size * 0.8))
-    murmur_detection_dataset_val = murmur_detection_dataset_train_val.skip(int(dataset_size * 0.8))
-    murmur_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, subset="validation", validation_split=0.2, batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE, )
+    murmur_detection_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE )
+    murmur_detection_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE )
+    murmur_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
     
-    murmur_config = get_murmur_model_configs()
-    murmur_model_new = Functional.from_config(murmur_config) 
-    optimizer = tfa.optimizers.AdamW(
-                learning_rate=0.0001,
-                weight_decay=0.01,
-                beta_1=0.9,
-                beta_2=0.999,
-                epsilon=1e-6,
-                exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"],
-            )  
-    murmur_model_new.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
+    # Dataset for final decision
+    all_files = []
+    for folder in murmur_image_folders:
+        all_files = all_files + glob.glob("{}/**/*".format(folder))
+    
+    import ipdb;ipdb.set_trace()
+    pass
+    patient_ids = pd.Series(all_files).str.split("/").str[2].str.split("_").str[0]
+    split = pd.Series(all_files).str.split("/").str[0].str.split("_").str[0]
+    label = pd.Series(all_files).str.split("/").str[1]
+    df = pd.concat([patient_ids, split, label],axis=1)
+    df.columns = ["patient", "split", "label"]
+    df = df.drop_duplicates(subset=["patient"])
+    
+    # murmur_config = get_murmur_model_configs()
+    # murmur_model_new = Functional.from_config(murmur_config) 
+    # optimizer = tfa.optimizers.AdamW(
+    #             learning_rate=0.0001,
+    #             weight_decay=0.01,
+    #             beta_1=0.9,
+    #             beta_2=0.999,
+    #             epsilon=1e-6,
+    #             exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"],
+    #         )  
+    # murmur_model_new.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
+    murmur_model_new = tf.keras.models.clone_model(noise_model_new)
+    murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+    # murmur_model_new.set_weights(noise_model_new.get_weights())
     murmur_model_new.fit(murmur_detection_dataset_train, validation_data=murmur_detection_dataset_val, epochs = 1000, class_weight=class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
             monitor="val_auc",
             min_delta=0,
@@ -607,13 +749,16 @@ def train_challenge_model(data_folder, model_folder, verbose):
             verbose=0,
             mode="max",
             baseline=None,
-            restore_best_weights=True,
-            workers= os.cpu_count() - 1
-        )])
+            restore_best_weights=True
+        )], workers= os.cpu_count() - 1)
     logger.info("Murmur Model Performance")
     logger.info(murmur_model_new.evaluate(murmur_detection_dataset_test, return_dict=True))
-    import ipdb;ipdb.set_trace()
-    pass
+    
+    
+
+    for row_id, row_patient in tqdm(df.iterrows()):
+        generate_patient_embeddings_folder(row_patient)
+    
     #     # Extract features.
     #     current_features = get_features(current_patient_data, current_recordings)
     #     features.append(current_features)
@@ -653,7 +798,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     # # Save the model.
     save_challenge_model(model_folder, noise_model_new, murmur_model, murmur_decision_model)
-
+    # clean_current_path()
     if verbose >= 1:
         print('Done.')
 

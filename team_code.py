@@ -117,6 +117,7 @@ GENERATE_MEL_SPECTOGRAMS_TRAIN = True
 EMBS_SIZE = 64
 
 FINAL_TRAINING = True
+EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1
 
 if False:
     MURMUR_EPOCHS = 1
@@ -935,7 +936,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             save_traces=True
         )
     
-    murmur_embedding_model = tf.keras.models.Sequential(murmur_model_new.layers[:-1])
+    murmur_embedding_model = tf.keras.models.Sequential(murmur_model_new.layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
     
     # Generating embeddings
     all_murmur_files_series = pd.Series(glob.glob(os.path.join(train_folder_murmur, "**/*.png")) + glob.glob(os.path.join(val_folder_murmur, "**/*.png")) + glob.glob(os.path.join(test_folder_murmur, "**/*.png")))
@@ -1083,7 +1084,7 @@ def run_challenge_model(model, data, recordings, verbose):
     imgs_noisy["imgs_path"].apply(lambda x: os.remove(x))
     
     # Get murmur embeddings
-    murmur_embeddings_model = tf.keras.models.Sequential(model["murmur_model"].layers[:-2])
+    murmur_embeddings_model = tf.keras.models.Sequential(model["murmur_model"].layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
     imgs_to_emb = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=MURMUR_IMAGE_SIZE)
     embs = murmur_embeddings_model.predict(imgs_to_emb)
     embs_df = pd.DataFrame(embs).sample(frac=1, random_state=42)

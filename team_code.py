@@ -989,7 +989,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         val_decision_dataset = test_decision_dataset
         
     murmur_decision_new.fit(train_decision_dataset, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
-            monitor="val_compute_weighted_accuracy:",
+            monitor="val_compute_weighted_accuracy",
             min_delta=0,
             patience=10,
             verbose=0,

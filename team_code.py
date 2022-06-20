@@ -630,9 +630,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     if LOAD_TRAINED_MODELS:
         try:
-            # noise_model = load_pretrained_model(model_folder, "noise")
+            noise_model = load_pretrained_model(model_folder, "noise")
             logger.info("Loading model: {}".format("noises"))
-            noise_model = load_model(os.path.join(model_folder, "noise_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+            # noise_model = load_model(os.path.join(model_folder, "noise_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
             logger.info(noise_model.summary())
             # murmur_model = load_model(os.path.join(model_folder, "murmur_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
             murmur_model = load_pretrained_model(model_folder, "murmur")
@@ -644,7 +644,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
             if verbose >= 1:
                 print('Done.')
         except OSError:
-            pass
+            logger.error("Could not load models setting all training to True")
+            TRAIN_NOISE_DETECTION = True
+            GENERATE_MEL_SPECTOGRAMS_TRAIN = True
+
 
     else:
         pass

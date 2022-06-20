@@ -1,5 +1,6 @@
 import os
 import glob
+import uuid
 
 
 github_token = input("Type github token: ")
@@ -30,8 +31,7 @@ os.system("python ./test_code_crossvalidation_splits.py &> model_training_output
 s3 = boto3.client("s3",  aws_access_key_id=ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
 lines = []
 for filepath in glob.glob("../*.csv"):
-    bucket = s3.Bucket("1hh-algorithm-dev")
-    response = bucket.upload_file(filepath, "models/" + os.path.basename(filepath))
+    response = s3.upload_file(filepath, "1hh-algorithm-dev", "models/" + str(uuid.uuid4()) + "_" + os.path.basename(filepath))
 text = "\n".join(lines)
 import urllib
 urllib.request.urlopen("https://vorkqcranza3s6f66wloniatvy0duufg.lambda-url.us-east-1.on.aws/?destiny=matheus.ld.araujo@gmail.com&text=DoneLambda&password={}&subject=DoneLambda".format(email_password))

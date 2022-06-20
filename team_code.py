@@ -37,6 +37,7 @@ import shutil
 import tensorflow_datasets as tfds
 from sklearn.preprocessing import OneHotEncoder
 from copy import deepcopy
+import autokeras as ak
 
 tf.keras.utils.set_random_seed(42)
 tf.config.experimental_run_functions_eagerly(True)
@@ -47,6 +48,7 @@ tf.data.experimental.enable_debug_mode()
 # Audio preprocessing
 #
 ################################################################################
+
 
 import librosa
 import IPython.display as ipd
@@ -69,6 +71,111 @@ from tqdm import tqdm
 import json
 from keras.engine.functional import Functional
 import tensorflow_addons as tfa
+import keras_tuner as kt
+
+from autokeras.engine import node as node_module
+from autokeras.engine import tuner
+from autokeras.nodes import Input
+from tensorflow import nest
+from tensorflow import keras
+from pathlib import Path
+from typing import List
+from typing import Optional
+from typing import Type
+from autokeras import blocks
+from typing import Union
+from autokeras.engine import head as head_module
+from autokeras import graph
+from autokeras import keras_layers
+
+class OHHGraph(graph.Graph):
+  def _compile_keras_model(self, hp, model):
+        # Specify hyperparameters from compile(...)
+        optimizer_name = hp.Choice(
+            "optimizer",
+            ["adam"],
+            default="adam",
+        )
+        # TODO: add adadelta optimizer when it can optimize embedding layer on GPU.
+        learning_rate = hp.Choice(
+            "learning_rate", [1e-3, 1e-4], default=1e-3
+        )
+
+        if optimizer_name == "adam":
+            optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
+        elif optimizer_name == "sgd":
+            optimizer = keras.optimizers.SGD(learning_rate=learning_rate)
+        elif optimizer_name == "adam_weight_decay":
+            steps_per_epoch = int(self.num_samples / self.batch_size)
+            num_train_steps = steps_per_epoch * self.epochs
+            warmup_steps = int(
+                self.epochs * self.num_samples * 0.1 / self.batch_size
+            )
+
+            lr_schedule = keras.optimizers.schedules.PolynomialDecay(
+                initial_learning_rate=learning_rate,
+                decay_steps=num_train_steps,
+                end_learning_rate=0.0,
+            )
+            if warmup_steps:
+                lr_schedule = keras_layers.WarmUp(
+                    initial_learning_rate=learning_rate,
+                    decay_schedule_fn=lr_schedule,
+                    warmup_steps=warmup_steps,
+                )
+
+            optimizer = keras_layers.AdamWeightDecay(
+                learning_rate=lr_schedule,
+                weight_decay_rate=0.01,
+                beta_1=0.9,
+                beta_2=0.999,
+                epsilon=1e-6,
+                exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"],
+            )
+
+        model.compile(
+            optimizer=optimizer, metrics=self._get_metrics(), loss=self._get_loss()
+        )
+
+        return model
+
+class OHHAutoModel(ak.AutoModel):
+
+  def _assemble(self):
+        """Assemble the Blocks based on the input output nodes."""
+        inputs = nest.flatten(self.inputs)
+        outputs = nest.flatten(self.outputs)
+
+        middle_nodes = [input_node.get_block()(input_node) for input_node in inputs]
+
+        # Merge the middle nodes.
+        if len(middle_nodes) > 1:
+            output_node = blocks.Merge()(middle_nodes)
+        else:
+            output_node = middle_nodes[0]
+
+        outputs = nest.flatten(
+            [output_blocks(output_node) for output_blocks in outputs]
+        )
+        return OHHGraph(inputs=inputs, outputs=outputs)
+
+  def _build_graph(self):
+        # Using functional API.
+        if all([isinstance(output, node_module.Node) for output in self.outputs]):
+            graph = OHHGraph(inputs=self.inputs, outputs=self.outputs)
+        # Using input/output API.
+        elif all([isinstance(output, head_module.Head) for output in self.outputs]):
+            # Clear session to reset get_uid(). The names of the blocks will
+            # start to count from 1 for new blocks in a new AutoModel afterwards.
+            # When initializing multiple AutoModel with Task API, if not
+            # counting from 1 for each of the AutoModel, the predefined hp
+            # values in task specifiec tuners would not match the names.
+            keras.backend.clear_session()
+            graph = self._assemble()
+            self.outputs = graph.outputs
+            keras.backend.clear_session()
+
+        return graph
 
 hop_length = 256
 REAL_SR = 4000
@@ -109,14 +216,16 @@ train_embs_negative_folder = train_embs_folder_murmur + os.path.sep + "negative"
 
 
 LOAD_TRAINED_MODELS = True
-TRAIN_NOISE_DETECTION = False
+TRAIN_NOISE_DETECTION = True
 
 NOISE_IMAGE_SIZE = [64, 64]
 RESHUFFLE_PATIENT_EMBS_N = 5
 MURMUR_IMAGE_SIZE = deepcopy(NOISE_IMAGE_SIZE)
 GENERATE_MEL_SPECTOGRAMS_TRAIN = True
 EMBS_SIZE = 64
-
+RUN_AUTOKERAS_NOISE = True
+RUN_AUTOKERAS_MURMUR = True
+RUN_AUTOKERAS_DECISION = True
 FINAL_TRAINING = False
 USE_COMPLEX_MODELS = True
 EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1 if not USE_COMPLEX_MODELS else -2
@@ -126,10 +235,12 @@ if False:
     MURMUR_EPOCHS = 1
     NOISE_EPOCHS = 1
     MURMUR_DECISION_EPOCHS = 1
+    MAX_TRIALS = 1
 else:
     MURMUR_EPOCHS = 1000
     NOISE_EPOCHS = 100
     MURMUR_DECISION_EPOCHS = 100
+    MAX_TRIALS = 100
 
 #Download autoencoder
 enc = OneHotEncoder()
@@ -137,7 +248,7 @@ enc.fit([[True], [False]])
 
 
 # Load a WAV file.
-def load_wav_file_matheus(filename):
+def load_wav_file_ohh(filename):
     frequency, recording = sp.io.wavfile.read(filename)
     return recording, frequency
 
@@ -650,85 +761,90 @@ def train_challenge_model(data_folder, model_folder, verbose):
             TRAIN_NOISE_DETECTION = True
             GENERATE_MEL_SPECTOGRAMS_TRAIN = True
 
-
-    else:
-        pass
     # Noise model - Parameters found after runnign AutoKeras
     if TRAIN_NOISE_DETECTION:
-        # noise_input_config, noise_cast_to_float_config, noise_normalization_config, noise_xception_config, noise_global_average_config, noise_dense_config, noise_classification_head_config = get_noise_model_configs()
-        
-        # noise_layer_0 = tf.keras.Input(**noise_input_config)
-        # noise_layer_1 = CastToFloat32.from_config(noise_cast_to_float_config)
-        # noise_layer_2 = tf.keras.layers.Normalization.from_config(noise_normalization_config)
-        # # noise_layer_3 = Functional.from_config(noise_xception_config)
-        # noise_layer_3a = tf.keras.layers.Conv2D(16, (3, 3), activation='relu')
-        # noise_layer_3b = tf.keras.layers.MaxPooling2D((2, 2))
-        # noise_layer_3c = tf.keras.layers.Conv2D(8, (3, 3), activation='relu')
-        
-        # noise_layer_4 = tf.keras.layers.GlobalAveragePooling2D.from_config(noise_global_average_config)
-        # noise_layer_5 = tf.keras.layers.Dense.from_config(noise_dense_config)
-        # noise_layer_6 = tf.keras.layers.Activation.from_config(noise_classification_head_config)
-        # noise_model_new = tf.keras.Sequential([noise_layer_0, noise_layer_1, noise_layer_2, tf.keras.applications.xception.Xception(
-        # include_top=False,
-        # input_tensor=None,
-        # weights=None,
-        # pooling=None,
-        # classes=2,
-        # classifier_activation='softmax'
-        # ), 
-        # noise_layer_4,
-        # noise_layer_5, noise_layer_6])
-        # assert np.sum([np.prod(v.get_shape().as_list()) for v in noise_model.trainable_variables]) == np.sum([np.prod(v.get_shape().as_list()) for v in noise_model_new.trainable_variables]), "Sanity check, leave commented"
-        # optimizer = tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False})
-        # noise_model_new.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
-        
-        noise_model_new = tf.keras.models.Sequential()
-        noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(NOISE_IMAGE_SIZE[0], NOISE_IMAGE_SIZE[1], 3)))
-        noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
-        noise_model_new.add(tf.keras.layers.Dropout(.2))
-        noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(NOISE_IMAGE_SIZE[0], NOISE_IMAGE_SIZE[1], 3)))
-        noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
-        noise_model_new.add(tf.keras.layers.Flatten())
-        noise_model_new.add(tf.keras.layers.Dropout(.5))
-        noise_model_new.add(tf.keras.layers.Dense(EMBS_SIZE, activation='relu'))
-        noise_model_new.add(tf.keras.layers.Dense(1, activation='sigmoid'))
-        noise_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), 
-                loss="binary_crossentropy",
-                metrics=get_all_metrics())
         batch_size = 4
-        
+            
         noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=0.2, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
         dataset_size = len(noise_detection_dataset_train_val)
         noise_detection_dataset_train_val = noise_detection_dataset_train_val.shuffle(buffer_size=dataset_size)
         noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * 0.7))
         noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * 0.7))
         noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=0.2, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
-        
+            
+        if RUN_AUTOKERAS_NOISE:
+            # model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+            # filepath=os.path.join(model_folder, "noise_model_ak.model"),
+            # save_weights_only=False,
+            # monitor='val_auc',
+            # loss="binary_crossentropy",
+            # mode='max',
+            # initial_value_threshold=0.8,
+            # save_best_only=True)
 
-        noise_model_new.fit(noise_detection_dataset_train, epochs = NOISE_EPOCHS, callbacks=[tf.keras.callbacks.EarlyStopping(
-            monitor="val_auc",
-            min_delta=0,
-            patience=10,
-            verbose=0,
-            mode="max",
-            baseline=None,
-            restore_best_weights=True,
-        )], validation_data=noise_detection_dataset_val, workers= os.cpu_count() - 1)
+            input_node = ak.ImageInput()
+            output_node = ak.ImageBlock(
+                block_type="xception",
+                augment=False
+            )(input_node)
+            output_node = ak.ClassificationHead()(output_node)
+
+            clf = OHHAutoModel(
+                inputs=input_node, seed=42, objective=kt.Objective("val_auc", direction="max"), outputs=output_node, overwrite=True, 
+                max_trials=MAX_TRIALS, metrics = get_all_metrics()
+            )
+            clf.fit(noise_detection_dataset_train, epochs = NOISE_EPOCHS, callbacks=[tf.keras.callbacks.EarlyStopping(
+                monitor="val_auc",
+                min_delta=0,
+                patience=10,
+                verbose=1,
+                mode="max",
+                baseline=None,
+                restore_best_weights=True,
+            )], validation_data=noise_detection_dataset_val, workers= os.cpu_count() - 1)
+            
+            noise_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+ 
+        else:
+            noise_model_new = tf.keras.models.Sequential()
+            noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(NOISE_IMAGE_SIZE[0], NOISE_IMAGE_SIZE[1], 3)))
+            noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
+            noise_model_new.add(tf.keras.layers.Dropout(.2))
+            noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(NOISE_IMAGE_SIZE[0], NOISE_IMAGE_SIZE[1], 3)))
+            noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
+            noise_model_new.add(tf.keras.layers.Flatten())
+            noise_model_new.add(tf.keras.layers.Dropout(.5))
+            noise_model_new.add(tf.keras.layers.Dense(EMBS_SIZE, activation='relu'))
+            noise_model_new.add(tf.keras.layers.Dense(1, activation='sigmoid'))
+            noise_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), 
+                    loss="binary_crossentropy",
+                    metrics=get_all_metrics())
+            
+            noise_model_new.fit(noise_detection_dataset_train, epochs = NOISE_EPOCHS, callbacks=[tf.keras.callbacks.EarlyStopping(
+                monitor="val_auc",
+                min_delta=0,
+                patience=10,
+                verbose=0,
+                mode="max",
+                baseline=None,
+                restore_best_weights=True,
+            )], validation_data=noise_detection_dataset_val, workers= os.cpu_count() - 1)
 
         logger.info("Noise Model Classification Report")
         logger.info(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True))
-        tf.keras.models.save_model(
+    else:
+        noise_model_new = noise_model
+        
+    tf.keras.models.save_model(
             noise_model_new,
             os.path.join(model_folder, 'noise_model.tf'),
             overwrite=True,
-            include_optimizer=True,
+            include_optimizer=False,
             save_format="tf",
             signatures=None,
             options=None,
             save_traces=True
         )
-    else:
-        noise_model_new = noise_model
     
     
     # ROOT_FOLDER = "/dev/shm/noise_imgs"
@@ -907,33 +1023,29 @@ def train_challenge_model(data_folder, model_folder, verbose):
     patient_split_df = patient_split_df.drop_duplicates(subset=["patient_id"])
     
     # Load dataset for murmur model training
-    class_weight = {0: 1, 1: 1.5}  
-    batch_size = 16
-    murmur_detection_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE )
-    murmur_detection_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE )
-    murmur_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE, )
+    # class_weight = {0: 1, 1: 1.5}  
+    class_weight = {0: 1, 1: 1}  
+    batch_size = 32
+    murmur_detection_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE )
+    murmur_detection_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE )
+    murmur_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE, )
     
     if FINAL_TRAINING:
         murmur_detection_dataset_train = murmur_detection_dataset_train.concatenate(murmur_detection_dataset_val)
         murmur_detection_dataset_val = murmur_detection_dataset_test
     
-    if USE_COMPLEX_MODELS:
-        murmur_config = get_murmur_model_configs()
-        murmur_model_new = Functional.from_config(murmur_config) 
-        optimizer = tfa.optimizers.AdamW(
-                    learning_rate=0.0001,
-                    weight_decay=0.01,
-                    beta_1=0.9,
-                    beta_2=0.999,
-                    epsilon=1e-6,
-                    exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"],
-                )  
-        murmur_model_new.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
-    else:
-        murmur_model_new = tf.keras.models.clone_model(noise_model_new)
-        murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
-    # murmur_model_new.set_weights(noise_model_new.get_weights())
-    murmur_model_new.fit(murmur_detection_dataset_train, validation_data=murmur_detection_dataset_val, epochs = MURMUR_EPOCHS, class_weight=class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
+    if RUN_AUTOKERAS_MURMUR:
+        input_node = ak.ImageInput()
+        hp = kt.HyperParameters()
+        output_node = ak.XceptionBlock(pretrained=False)(input_node)
+        output_node = ak.SpatialReduction(reduction_type="flatten")(output_node)
+        output_node = ak.DenseBlock(num_layers=1, num_units=64, dropout=0)(output_node)
+        output_node = ak.ClassificationHead(num_classes = 2, dropout=0)(output_node)
+
+        clf = OHHAutoModel(
+            inputs=input_node, tuner="bayesian", seed=42, objective=kt.Objective("val_auc", direction="max"), outputs=output_node, overwrite=True, 
+            max_trials=MAX_TRIALS, metrics = get_all_metrics())
+        clf.fit(murmur_detection_dataset_train, validation_data=murmur_detection_dataset_val, epochs = MURMUR_EPOCHS, class_weight=class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
             monitor="val_auc",
             min_delta=0,
             patience=10,
@@ -942,6 +1054,34 @@ def train_challenge_model(data_folder, model_folder, verbose):
             baseline=None,
             restore_best_weights=True
         )], workers= os.cpu_count() - 1)
+        murmur_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+  
+    else:
+        if USE_COMPLEX_MODELS:
+            murmur_config = get_murmur_model_configs()
+            murmur_model_new = Functional.from_config(murmur_config) 
+            optimizer = tfa.optimizers.AdamW(
+                        learning_rate=0.0001,
+                        weight_decay=0.01,
+                        beta_1=0.9,
+                        beta_2=0.999,
+                        epsilon=1e-6,
+                        exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"],
+                    )  
+            murmur_model_new.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
+        else:
+            murmur_model_new = tf.keras.models.clone_model(noise_model_new)
+            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+        murmur_model_new.fit(murmur_detection_dataset_train, validation_data=murmur_detection_dataset_val, epochs = MURMUR_EPOCHS, class_weight=class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
+            monitor="val_auc",
+            min_delta=0,
+            patience=10,
+            verbose=0,
+            mode="max",
+            baseline=None,
+            restore_best_weights=True
+        )], workers= os.cpu_count() - 1)
+    # murmur_model_new.set_weights(noise_model_new.get_weights())
     logger.info("Murmur Model Performance")
     logger.info(murmur_model_new.evaluate(murmur_detection_dataset_test, return_dict=True))
     tf.keras.models.save_model(
@@ -1001,37 +1141,67 @@ def train_challenge_model(data_folder, model_folder, verbose):
     test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), embs_label_test)).batch(1)
     
     #TODO have simple version for this
-    murmur_decision_config = get_murmur_decision_model_configs()
-    murmur_decision_new = Functional.from_config(murmur_decision_config) 
-    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.00001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+    
     
     if FINAL_TRAINING:
         train_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
         val_decision_dataset = test_decision_dataset
-        
-    murmur_decision_new.fit(train_decision_dataset, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
-            monitor="val_compute_weighted_accuracy",
-            min_delta=0,
-            patience=10,
-            verbose=0,
-            mode="max",
-            baseline=None,
-            restore_best_weights=True
-        )], workers= os.cpu_count() - 1)
     
-    logger.info("Murmur Detection Model Classification Report")
-    logger.info(murmur_decision_new.evaluate(test_decision_dataset, return_dict=True))
-    
-    tf.keras.models.save_model(
-            murmur_decision_new,
-            os.path.join(model_folder, 'murmur_decision.tf'),
+    if RUN_AUTOKERAS_DECISION:
+        input = ak.Input(name=None)
+        output_node = ak.DenseBlock(num_layers=None, num_units=None, dropout=None)(input)
+        output_node = ak.ClassificationHead(dropout=0)(output_node)
+        clf = ak.AutoModel(
+            input,
+            output_node,
+            project_name="auto_model",
+            max_trials=100,
+            directory=None,
+            tuner="bayesian",
             overwrite=True,
-            include_optimizer=True,
-            save_format="tf",
-            signatures=None,
-            options=None,
-            save_traces=True
+            seed=42,
+            objective = kt.Objective("val_compute_weighted_accuracy", direction="max"),
+            max_model_size=None, 
+            metrics = get_all_metrics()
         )
+        clf.fit(train_decision_dataset, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
+                monitor="val_compute_weighted_accuracy",
+                min_delta=0,
+                patience=10,
+                verbose=0,
+                mode="max",
+                baseline=None,
+                restore_best_weights=True
+            )], workers= os.cpu_count() - 1)
+        murmur_decision_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+        
+    else:
+        murmur_decision_config = get_murmur_decision_model_configs()
+        murmur_decision_new = Functional.from_config(murmur_decision_config) 
+        murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.00001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+        murmur_decision_new.fit(train_decision_dataset, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
+                monitor="val_compute_weighted_accuracy",
+                min_delta=0,
+                patience=10,
+                verbose=0,
+                mode="max",
+                baseline=None,
+                restore_best_weights=True
+            )], workers= os.cpu_count() - 1)
+        
+        logger.info("Murmur Detection Model Classification Report")
+        logger.info(murmur_decision_new.evaluate(test_decision_dataset, return_dict=True))
+        
+    tf.keras.models.save_model(
+                murmur_decision_new,
+                os.path.join(model_folder, 'murmur_decision.tf'),
+                overwrite=True,
+                include_optimizer=True,
+                save_format="tf",
+                signatures=None,
+                options=None,
+                save_traces=True
+            )
     
    
     

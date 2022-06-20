@@ -284,7 +284,7 @@ model.sav
 
 test_outputs/
 train_outputs/
-
+auto_model/
 .DS_Store
 local/
 model

@@ -38,7 +38,7 @@ if __name__ == "__main__":
             "label" : patient_label 
         })
     if IS_MINI:
-        patient_info_df = pd.DataFrame(patient_infos).sample(20, random_state=42)
+        patient_info_df = pd.DataFrame(patient_infos).sample(50, random_state=42)
     else:
         patient_info_df = pd.DataFrame(patient_infos).sample(frac=1, random_state=42)
     

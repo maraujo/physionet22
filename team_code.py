@@ -36,6 +36,7 @@ from uuid import uuid4
 import shutil
 import tensorflow_datasets as tfds
 from sklearn.preprocessing import OneHotEncoder
+from copy import deepcopy
 
 tf.keras.utils.set_random_seed(42)
 tf.config.experimental_run_functions_eagerly(True)
@@ -112,15 +113,16 @@ TRAIN_NOISE_DETECTION = True
 
 NOISE_IMAGE_SIZE = (64, 64)
 RESHUFFLE_PATIENT_EMBS_N = 5
-MURMUR_IMAGE_SIZE = NOISE_IMAGE_SIZE
+MURMUR_IMAGE_SIZE = deepcopy(NOISE_IMAGE_SIZE)
 GENERATE_MEL_SPECTOGRAMS_TRAIN = True
 EMBS_SIZE = 64
 
 FINAL_TRAINING = False
-EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1
-USE_COMPLEX_MODELS = False
+USE_COMPLEX_MODELS = True
+EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1 if not USE_COMPLEX_MODELS else -2
 
-if False:
+
+if True:
     MURMUR_EPOCHS = 1
     NOISE_EPOCHS = 1
     MURMUR_DECISION_EPOCHS = 1
@@ -331,11 +333,15 @@ def load_pretrained_model(model_dir, model_type):
     logger.info("Loading model: {}".format(model_type))
     os.makedirs(model_dir, exist_ok=True)
     if model_type == "murmur":
+        MURMUR_IMAGE_SIZE[0] = 72
+        MURMUR_IMAGE_SIZE[1] = 72
         destiny_zip = os.path.join(model_dir, 'murmur_model.zip')
         destiny_model = os.path.join(model_dir, 'murmur_model.model')
         url = "http://algodev.matheusaraujo.com:8888/pretrained_models/model_murmur_checkpoint72_x_72.zip"
         
     if model_type == "noise":
+        NOISE_IMAGE_SIZE[0] = 108
+        NOISE_IMAGE_SIZE[1] = 108
         destiny_zip = os.path.join(model_dir, 'noise_model.zip')
         destiny_model = os.path.join(model_dir, 'noise_model.model')
         url = "http://algodev.matheusaraujo.com:8888/pretrained_models/noise_model_108x108.zip"
@@ -684,7 +690,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         noise_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), 
                 loss="binary_crossentropy",
                 metrics=get_all_metrics())
-        batch_size = 1
+        batch_size = 4
         
         noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=0.2, batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE, )
         dataset_size = len(noise_detection_dataset_train_val)
@@ -697,7 +703,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         noise_model_new.fit(noise_detection_dataset_train, epochs = NOISE_EPOCHS, callbacks=[tf.keras.callbacks.EarlyStopping(
             monitor="val_auc",
             min_delta=0,
-            patience=20,
+            patience=10,
             verbose=0,
             mode="max",
             baseline=None,

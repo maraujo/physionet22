@@ -109,9 +109,9 @@ train_embs_negative_folder = train_embs_folder_murmur + os.path.sep + "negative"
 
 
 LOAD_TRAINED_MODELS = True
-TRAIN_NOISE_DETECTION = True
+TRAIN_NOISE_DETECTION = False
 
-NOISE_IMAGE_SIZE = (64, 64)
+NOISE_IMAGE_SIZE = [64, 64]
 RESHUFFLE_PATIENT_EMBS_N = 5
 MURMUR_IMAGE_SIZE = deepcopy(NOISE_IMAGE_SIZE)
 GENERATE_MEL_SPECTOGRAMS_TRAIN = True
@@ -692,12 +692,12 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 metrics=get_all_metrics())
         batch_size = 4
         
-        noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=0.2, batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE, )
+        noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=0.2, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
         dataset_size = len(noise_detection_dataset_train_val)
         noise_detection_dataset_train_val = noise_detection_dataset_train_val.shuffle(buffer_size=dataset_size)
         noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * 0.7))
         noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * 0.7))
-        noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=0.2, batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE, )
+        noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=0.2, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
         
 
         noise_model_new.fit(noise_detection_dataset_train, epochs = NOISE_EPOCHS, callbacks=[tf.keras.callbacks.EarlyStopping(
@@ -904,9 +904,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # Load dataset for murmur model training
     class_weight = {0: 1, 1: 1.5}  
     batch_size = 16
-    murmur_detection_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE )
-    murmur_detection_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE )
-    murmur_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
+    murmur_detection_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE )
+    murmur_detection_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE )
+    murmur_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, batch_size=batch_size, seed=42, image_size=MURMUR_IMAGE_SIZE, )
     
     if FINAL_TRAINING:
         murmur_detection_dataset_train = murmur_detection_dataset_train.concatenate(murmur_detection_dataset_val)
@@ -995,6 +995,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), embs_label_val)).batch(1)
     test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), embs_label_test)).batch(1)
     
+    #TODO have simple version for this
     murmur_decision_config = get_murmur_decision_model_configs()
     murmur_decision_new = Functional.from_config(murmur_decision_config) 
     murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.00001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
@@ -1041,7 +1042,15 @@ def load_challenge_model(model_folder, verbose):
     noise_model = load_model(os.path.join(model_folder, 'noise_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_model = load_model(os.path.join(model_folder, 'murmur_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_decision_model = load_model(os.path.join(model_folder, 'murmur_decision_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-    return {"noise_model" : noise_model, "murmur_model" : murmur_model, "murmur_decision_model": murmur_decision_model}
+    models_info = pd.read_pickle(os.path.join(model_folder,"models_info.pickle"))
+    return {"noise_model" : noise_model, 
+            "murmur_model" : murmur_model, 
+            "murmur_decision_model": murmur_decision_model,
+            "EMBDS_PER_PATIENTS" : models_info["EMBDS_PER_PATIENTS"],
+            "EMBS_SIZE" : models_info["EMBS_SIZE"],
+            "NOISE_IMAGE_SIZE" : models_info["NOISE_IMAGE_SIZE"],
+            "MURMUR_IMAGE_SIZE" : models_info["MURMUR_IMAGE_SIZE"],
+            }
 
 def get_unique_name():
     return str(uuid4())
@@ -1066,7 +1075,7 @@ def run_challenge_model(model, data, recordings, verbose):
     
     clean_folder(AUX_IMGS_FOLDER)
     clean_folder(AUX_FOLDER)
-    
+        
     
     for recording in recordings:
         recording = recording / 2 ** (16 - 1) # Normalize as: https://stackoverflow.com/questions/50062358/difference-between-load-of-librosa-and-read-of-scipy-io-wavfile
@@ -1082,7 +1091,7 @@ def run_challenge_model(model, data, recordings, verbose):
     for clean_file in clean_files:
         generate_mel_wav_crops((clean_file, AUX_IMGS_FOLDER))
 
-    imgs_to_filter = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=NOISE_IMAGE_SIZE)
+    imgs_to_filter = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=model["NOISE_IMAGE_SIZE"])
     imgs_noise_prediction = model["noise_model"].predict(imgs_to_filter)
     imgs_noise_df = pd.DataFrame({"imgs_path":imgs_to_filter.file_paths, "noise_prob" : imgs_noise_prediction.flatten()})
     imgs_clean = imgs_noise_df[imgs_noise_df["noise_prob"] < 0.5]
@@ -1099,14 +1108,14 @@ def run_challenge_model(model, data, recordings, verbose):
     
     # Get murmur embeddings
     murmur_embeddings_model = tf.keras.models.Sequential(model["murmur_model"].layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
-    imgs_to_emb = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=MURMUR_IMAGE_SIZE)
+    imgs_to_emb = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=model["MURMUR_IMAGE_SIZE"])
     embs = murmur_embeddings_model.predict(imgs_to_emb)
     embs_df = pd.DataFrame(embs).sample(frac=1, random_state=42)
 
-    if embs_df.shape[0] < EMBDS_PER_PATIENTS:
-        embs_df = embs_df.sample(EMBDS_PER_PATIENTS, replace=True, random_state=42)
+    if embs_df.shape[0] < model["EMBDS_PER_PATIENTS"]:
+        embs_df = embs_df.sample(model["EMBDS_PER_PATIENTS"], replace=True, random_state=42)
     else:
-        embs_df = embs_df.head(EMBDS_PER_PATIENTS)
+        embs_df = embs_df.head(model["EMBDS_PER_PATIENTS"])
     
     prediction = model["murmur_decision_model"].predict(embs_df.values.flatten().reshape(1,-1))
     present_prob = prediction[0][0]
@@ -1168,6 +1177,16 @@ def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decisio
     noise_model.save(os.path.join(model_folder, "noise_model.h5"))
     murmur_model.save(os.path.join(model_folder, "murmur_model.h5"))
     murmur_decision_model.save(os.path.join(model_folder, "murmur_decision_model.h5"))
+    EMBDS_PER_PATIENTS = 138
+    EMBS_SIZE = 64
+    NOISE_IMAGE_SIZE
+    MURMUR_IMAGE_SIZE
+    pd.Series({
+        "EMBDS_PER_PATIENTS" : EMBDS_PER_PATIENTS,
+        "EMBS_SIZE" : EMBS_SIZE,
+        "NOISE_IMAGE_SIZE" : NOISE_IMAGE_SIZE,
+        "MURMUR_IMAGE_SIZE" : MURMUR_IMAGE_SIZE
+    }).to_pickle(os.path.join(model_folder, "models_info.pickle"))
 
 def get_murmur_decision_model_configs():
     murmur_decision_config = {'name': 'model', 'layers': [{'class_name': 'InputLayer', 'config': {'batch_input_shape': (None, EMBS_SIZE * EMBDS_PER_PATIENTS), 'dtype': 'float32', 'sparse': False, 'ragged': False, 'name': 'input_1'}, 'name': 'input_1', 'inbound_nodes': []}, {'class_name': 'Custom>CastToFloat32', 'config': {'name': 'cast_to_float32', 'trainable': True, 'dtype': 'float32'}, 'name': 'cast_to_float32', 'inbound_nodes': [[['input_1', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense', 'trainable': True, 'dtype': 'float32', 'units': 1024, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': None}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense', 'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]]}, {'class_name': 'ReLU', 'config': {'name': 're_lu', 'trainable': True, 'dtype': 'float32', 'max_value': None, 'negative_slope': array(0., dtype=float32), 'threshold': array(0., dtype=float32)}, 'name': 're_lu', 'inbound_nodes': [[['dense', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense_1', 'trainable': True, 'dtype': 'float32', 'units': 1, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': None}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense_1', 'inbound_nodes': [[['re_lu', 0, 0, {}]]]}, {'class_name': 'Activation', 'config': {'name': 'classification_head_1', 'trainable': True, 'dtype': 'float32', 'activation': 'sigmoid'}, 'name': 'classification_head_1', 'inbound_nodes': [[['dense_1', 0, 0, {}]]]}], 'input_layers': [['input_1', 0, 0]], 'output_layers': [['classification_head_1', 0, 0]]}

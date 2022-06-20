@@ -16,3 +16,4 @@ seaborn==0.11.2
 tensorflow-datasets
 matplotlib==3.5.1
 imageio-ffmpeg==0.4.5
+boto3==1.16.63

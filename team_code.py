@@ -118,6 +118,7 @@ EMBS_SIZE = 64
 
 FINAL_TRAINING = False
 EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1
+USE_COMPLEX_MODELS = False
 
 if False:
     MURMUR_EPOCHS = 1
@@ -132,6 +133,11 @@ else:
 enc = OneHotEncoder()
 enc.fit([[True], [False]])
 
+
+# Load a WAV file.
+def load_wav_file_matheus(filename):
+    frequency, recording = sp.io.wavfile.read(filename)
+    return recording, frequency
 
 def butter_bandpass(lowcut, highcut, fs, order=5):
     return butter(order, [lowcut, highcut], fs=fs, btype='band')
@@ -622,11 +628,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
             logger.info("Loading model: {}".format("noises"))
             noise_model = load_model(os.path.join(model_folder, "noise_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
             logger.info(noise_model.summary())
-            murmur_model = load_model(os.path.join(model_folder, "murmur_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-            # murmur_model = load_pretrained_model(model_folder, "murmur")
+            # murmur_model = load_model(os.path.join(model_folder, "murmur_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+            murmur_model = load_pretrained_model(model_folder, "murmur")
             logger.info(murmur_model.summary())
-            murmur_decision_model = load_model(os.path.join(model_folder, "murmur_decision.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-            # murmur_decision_model = load_pretrained_model(model_folder, "murmur_decision")
+            # murmur_decision_model = load_model(os.path.join(model_folder, "murmur_decision.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+            murmur_decision_model = load_pretrained_model(model_folder, "murmur_decision")
             logger.info(murmur_decision_model.summary())
             # save_challenge_model(model_folder, noise_model, murmur_model, murmur_decision_model)
             if verbose >= 1:
@@ -696,7 +702,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             mode="max",
             baseline=None,
             restore_best_weights=True,
-        )], validation_data=noise_detection_dataset_val)
+        )], validation_data=noise_detection_dataset_val, workers= os.cpu_count() - 1)
 
         logger.info("Noise Model Classification Report")
         logger.info(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True))
@@ -900,19 +906,21 @@ def train_challenge_model(data_folder, model_folder, verbose):
         murmur_detection_dataset_train = murmur_detection_dataset_train.concatenate(murmur_detection_dataset_val)
         murmur_detection_dataset_val = murmur_detection_dataset_test
     
-    # murmur_config = get_murmur_model_configs()
-    # murmur_model_new = Functional.from_config(murmur_config) 
-    # optimizer = tfa.optimizers.AdamW(
-    #             learning_rate=0.0001,
-    #             weight_decay=0.01,
-    #             beta_1=0.9,
-    #             beta_2=0.999,
-    #             epsilon=1e-6,
-    #             exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"],
-    #         )  
-    # murmur_model_new.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
-    murmur_model_new = tf.keras.models.clone_model(noise_model_new)
-    murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+    if USE_COMPLEX_MODELS:
+        murmur_config = get_murmur_model_configs()
+        murmur_model_new = Functional.from_config(murmur_config) 
+        optimizer = tfa.optimizers.AdamW(
+                    learning_rate=0.0001,
+                    weight_decay=0.01,
+                    beta_1=0.9,
+                    beta_2=0.999,
+                    epsilon=1e-6,
+                    exclude_from_weight_decay=["LayerNorm", "layer_norm", "bias"],
+                )  
+        murmur_model_new.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
+    else:
+        murmur_model_new = tf.keras.models.clone_model(noise_model_new)
+        murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
     # murmur_model_new.set_weights(noise_model_new.get_weights())
     murmur_model_new.fit(murmur_detection_dataset_train, validation_data=murmur_detection_dataset_val, epochs = MURMUR_EPOCHS, class_weight=class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
             monitor="val_auc",

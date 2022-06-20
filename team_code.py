@@ -88,6 +88,77 @@ from autokeras.engine import head as head_module
 from autokeras import graph
 from autokeras import keras_layers
 
+
+hop_length = 256
+REAL_SR = 4000
+FIGURE_SIZE = 3
+EMBDS_PER_PATIENTS = 138
+train_folder_murmur = "train_folder_murmur"
+test_folder_murmur = "test_folder_murmur"
+val_folder_murmur = "val_folder_murmur"
+
+val_positive_folder = val_folder_murmur + os.path.sep + "positive"
+val_negative_folder = val_folder_murmur + os.path.sep + "negative"
+test_positive_folder = test_folder_murmur + os.path.sep + "positive"
+test_negative_folder = test_folder_murmur + os.path.sep + "negative"
+train_positive_folder = train_folder_murmur + os.path.sep + "positive"
+train_negative_folder = train_folder_murmur + os.path.sep + "negative"
+
+train_outcome_folder = "train_outcome_folder"
+test_outcome_folder = "test_outcome_folder"
+val_outcome_folder = "val_outcome_folder"
+
+val_outcome_positive_folder = val_outcome_folder + os.path.sep + "positive"
+val_outcome_negative_folder = val_outcome_folder + os.path.sep + "negative"
+test_outcome_positive_folder = test_outcome_folder + os.path.sep + "positive"
+test_outcome_negative_folder = test_outcome_folder + os.path.sep + "negative"
+train_outcome_positive_folder = train_outcome_folder + os.path.sep + "positive"
+train_outcome_negative_folder = train_outcome_folder + os.path.sep + "negative"
+
+train_embs_folder_murmur = "train_embs_folder_murmur"
+test_embs_folder_murmur = "test_embs_folder_murmur"
+val_embs_folder_murmur = "val_embs_folder_murmur"
+
+val_embs_positive_folder = val_embs_folder_murmur + os.path.sep + "positive"
+val_embs_negative_folder = val_embs_folder_murmur + os.path.sep + "negative"
+test_embs_positive_folder = test_embs_folder_murmur + os.path.sep + "positive"
+test_embs_negative_folder = test_embs_folder_murmur + os.path.sep + "negative"
+train_embs_positive_folder = train_embs_folder_murmur + os.path.sep + "positive"
+train_embs_negative_folder = train_embs_folder_murmur + os.path.sep + "negative"
+
+
+LOAD_TRAINED_MODELS = False
+TRAIN_NOISE_DETECTION = True
+
+NOISE_IMAGE_SIZE = [64, 64]
+RESHUFFLE_PATIENT_EMBS_N = 5
+MURMUR_IMAGE_SIZE = deepcopy(NOISE_IMAGE_SIZE)
+GENERATE_MEL_SPECTOGRAMS_TRAIN = True
+EMBS_SIZE = 64
+RUN_AUTOKERAS_NOISE = True
+RUN_AUTOKERAS_MURMUR = True
+RUN_AUTOKERAS_DECISION = True
+FINAL_TRAINING = False
+USE_COMPLEX_MODELS = True
+EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1 if not USE_COMPLEX_MODELS else -2
+
+
+if True:
+    MURMUR_EPOCHS = 1
+    NOISE_EPOCHS = 1
+    MURMUR_DECISION_EPOCHS = 1
+    MAX_TRIALS = 1
+else:
+    MURMUR_EPOCHS = 1000
+    NOISE_EPOCHS = 100
+    MURMUR_DECISION_EPOCHS = 100
+    MAX_TRIALS = 100
+
+#Download autoencoder
+enc = OneHotEncoder()
+enc.fit([[True], [False]])
+
+
 class OHHGraph(graph.Graph):
   def _compile_keras_model(self, hp, model):
         # Specify hyperparameters from compile(...)
@@ -176,77 +247,7 @@ class OHHAutoModel(ak.AutoModel):
             keras.backend.clear_session()
 
         return graph
-
-hop_length = 256
-REAL_SR = 4000
-FIGURE_SIZE = 3
-EMBDS_PER_PATIENTS = 138
-train_folder_murmur = "train_folder_murmur"
-test_folder_murmur = "test_folder_murmur"
-val_folder_murmur = "val_folder_murmur"
-
-val_positive_folder = val_folder_murmur + os.path.sep + "positive"
-val_negative_folder = val_folder_murmur + os.path.sep + "negative"
-test_positive_folder = test_folder_murmur + os.path.sep + "positive"
-test_negative_folder = test_folder_murmur + os.path.sep + "negative"
-train_positive_folder = train_folder_murmur + os.path.sep + "positive"
-train_negative_folder = train_folder_murmur + os.path.sep + "negative"
-
-train_outcome_folder = "train_outcome_folder"
-test_outcome_folder = "test_outcome_folder"
-val_outcome_folder = "val_outcome_folder"
-
-val_outcome_positive_folder = val_outcome_folder + os.path.sep + "positive"
-val_outcome_negative_folder = val_outcome_folder + os.path.sep + "negative"
-test_outcome_positive_folder = test_outcome_folder + os.path.sep + "positive"
-test_outcome_negative_folder = test_outcome_folder + os.path.sep + "negative"
-train_outcome_positive_folder = train_outcome_folder + os.path.sep + "positive"
-train_outcome_negative_folder = train_outcome_folder + os.path.sep + "negative"
-
-train_embs_folder_murmur = "train_embs_folder_murmur"
-test_embs_folder_murmur = "test_embs_folder_murmur"
-val_embs_folder_murmur = "val_embs_folder_murmur"
-
-val_embs_positive_folder = val_embs_folder_murmur + os.path.sep + "positive"
-val_embs_negative_folder = val_embs_folder_murmur + os.path.sep + "negative"
-test_embs_positive_folder = test_embs_folder_murmur + os.path.sep + "positive"
-test_embs_negative_folder = test_embs_folder_murmur + os.path.sep + "negative"
-train_embs_positive_folder = train_embs_folder_murmur + os.path.sep + "positive"
-train_embs_negative_folder = train_embs_folder_murmur + os.path.sep + "negative"
-
-
-LOAD_TRAINED_MODELS = True
-TRAIN_NOISE_DETECTION = True
-
-NOISE_IMAGE_SIZE = [64, 64]
-RESHUFFLE_PATIENT_EMBS_N = 5
-MURMUR_IMAGE_SIZE = deepcopy(NOISE_IMAGE_SIZE)
-GENERATE_MEL_SPECTOGRAMS_TRAIN = True
-EMBS_SIZE = 64
-RUN_AUTOKERAS_NOISE = True
-RUN_AUTOKERAS_MURMUR = True
-RUN_AUTOKERAS_DECISION = True
-FINAL_TRAINING = False
-USE_COMPLEX_MODELS = True
-EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1 if not USE_COMPLEX_MODELS else -2
-
-
-if False:
-    MURMUR_EPOCHS = 1
-    NOISE_EPOCHS = 1
-    MURMUR_DECISION_EPOCHS = 1
-    MAX_TRIALS = 1
-else:
-    MURMUR_EPOCHS = 1000
-    NOISE_EPOCHS = 100
-    MURMUR_DECISION_EPOCHS = 100
-    MAX_TRIALS = 100
-
-#Download autoencoder
-enc = OneHotEncoder()
-enc.fit([[True], [False]])
-
-
+    
 # Load a WAV file.
 def load_wav_file_ohh(filename):
     frequency, recording = sp.io.wavfile.read(filename)
@@ -756,8 +757,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 print('Done.')
         except OSError:
             logger.error("Could not load models setting all training to True")
-            TRAIN_NOISE_DETECTION
-            GENERATE_MEL_SPECTOGRAMS_TRAIN
             TRAIN_NOISE_DETECTION = True
             GENERATE_MEL_SPECTOGRAMS_TRAIN = True
 

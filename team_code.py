@@ -612,7 +612,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     AUX_IMGS_POSITIVE_FOLDER = os.path.join(AUX_IMGS_FOLDER, "positive")
     AUX_IMGS_NEGATIVE_FOLDER = os.path.join(AUX_IMGS_FOLDER, "negative")
     murmur_image_folders = [train_positive_folder, train_negative_folder, val_positive_folder, val_negative_folder, test_positive_folder, test_negative_folder]
-    
+    global GENERATE_MEL_SPECTOGRAMS_TRAIN, TRAIN_NOISE_DETECTION
     if GENERATE_MEL_SPECTOGRAMS_TRAIN:
         clean_current_path()
     
@@ -645,6 +645,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 print('Done.')
         except OSError:
             logger.error("Could not load models setting all training to True")
+            global TRAIN_NOISE_DETECTION
+            global GENERATE_MEL_SPECTOGRAMS_TRAIN
             TRAIN_NOISE_DETECTION = True
             GENERATE_MEL_SPECTOGRAMS_TRAIN = True
 

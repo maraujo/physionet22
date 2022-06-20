@@ -645,8 +645,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 print('Done.')
         except OSError:
             logger.error("Could not load models setting all training to True")
-            global TRAIN_NOISE_DETECTION
-            global GENERATE_MEL_SPECTOGRAMS_TRAIN
+            TRAIN_NOISE_DETECTION
+            GENERATE_MEL_SPECTOGRAMS_TRAIN
             TRAIN_NOISE_DETECTION = True
             GENERATE_MEL_SPECTOGRAMS_TRAIN = True
 

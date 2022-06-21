@@ -143,7 +143,7 @@ FINAL_TRAINING = False
 USE_COMPLEX_MODELS = True
 EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1 if not USE_COMPLEX_MODELS else -2
 
-WORKERS = os.cpu_count() - 1
+WORKERS = min(os.cpu_count() - 1, 8)
 
 OHH_ARGS = None
 RUN_TEST = None

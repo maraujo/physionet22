@@ -775,19 +775,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     # Noise model - Parameters found after runnign AutoKeras
     if TRAIN_NOISE_DETECTION:
-        batch_size = 8
-            
-        noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=0.2, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
-        dataset_size = len(noise_detection_dataset_train_val)
-        noise_detection_dataset_train_val = noise_detection_dataset_train_val.shuffle(buffer_size=dataset_size)
-        noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * 0.8))
-        noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * 0.8))
-        noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=0.2, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
+        batch_size = 4
+         
         
-        noise_detection_dataset_train = noise_detection_dataset_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-        noise_detection_dataset_val = noise_detection_dataset_val.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-        noise_detection_dataset_test = noise_detection_dataset_test.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-            
         if RUN_AUTOKERAS_NOISE:
             # model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
             # filepath=os.path.join(model_folder, "noise_model_ak.model"),
@@ -797,32 +787,64 @@ def train_challenge_model(data_folder, model_folder, verbose):
             # mode='max',
             # initial_value_threshold=0.8,
             # save_best_only=True)
+            noise_detection_dataset_train = ak.image_dataset_from_directory(
+                NOISE_DETECTION_IMGS_PATH,
+                # Use 20% data as testing data.
+                validation_split=0.2,
+                subset="training",
+                # Set seed to ensure the same split when loading testing data.
+                seed=42,
+                image_size=NOISE_IMAGE_SIZE,
+                batch_size=batch_size,
+            )
 
+            noise_detection_dataset_test = ak.image_dataset_from_directory(
+                NOISE_DETECTION_IMGS_PATH,
+                validation_split=0.2,
+                subset="validation",
+                seed=42,
+                image_size=NOISE_IMAGE_SIZE,
+                batch_size=batch_size,
+            )
+            
             input_node = ak.ImageInput()
             output_node = ak.ImageBlock(
                 block_type="xception",
                 augment=False
             )(input_node)
-            output_node = ak.ClassificationHead()(output_node)
+            output_node = ak.ClassificationHead(loss="binary_crossentropy")(output_node)
 
             clf = OHHAutoModel(
                 inputs=input_node, seed=42, objective=kt.Objective("val_auc", direction="max"), outputs=output_node, overwrite=True, 
                 max_trials=MAX_TRIALS, metrics = get_all_metrics()
             )
-            clf.fit(noise_detection_dataset_train, epochs = NOISE_EPOCHS, callbacks=[tf.keras.callbacks.EarlyStopping(
-                monitor="val_auc",
-                min_delta=0,
-                patience=10,
-                verbose=1,
-                mode="max",
-                baseline=None,
-                restore_best_weights=True,
-            )], validation_data=noise_detection_dataset_val, workers= WORKERS, 
-                    max_queue_size=15000, use_multiprocessing=False)
+            clf.fit(noise_detection_dataset_train, epochs = NOISE_EPOCHS, workers= WORKERS, max_queue_size=15000, use_multiprocessing=False)
+            
+            #TODO: Test
+            logger.info("Noise Model Classification Report")
+            logger.info(clf.evaluate(noise_detection_dataset_test, return_dict=True))
             
             noise_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+            
  
         else:
+            noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=0.2, seed=42, image_size=NOISE_IMAGE_SIZE)
+            dataset_size = len(noise_detection_dataset_train_val)
+            noise_detection_dataset_train_val = noise_detection_dataset_train_val.shuffle(buffer_size=dataset_size)
+            noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * 0.8))
+            noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * 0.8))
+            noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=0.2, seed=42, image_size=NOISE_IMAGE_SIZE)
+            
+               
+            noise_detection_dataset_train = noise_detection_dataset_train.batch(batch_size,drop_remainder=True)        
+            noise_detection_dataset_val = noise_detection_dataset_val.batch(batch_size,drop_remainder=True)        
+            noise_detection_dataset_test = noise_detection_dataset_test.batch(batch_size,drop_remainder=True)   
+            
+            noise_detection_dataset_train = noise_detection_dataset_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+            noise_detection_dataset_val = noise_detection_dataset_val.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+            noise_detection_dataset_test = noise_detection_dataset_test.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+                
+            
             noise_model_new = tf.keras.models.Sequential()
             noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(NOISE_IMAGE_SIZE[0], NOISE_IMAGE_SIZE[1], 3)))
             noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
@@ -847,8 +869,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 restore_best_weights=True,
             )], validation_data=noise_detection_dataset_val, workers= WORKERS)
 
-        logger.info("Noise Model Classification Report")
-        logger.info(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True))
+            logger.info("Noise Model Classification Report")
+            logger.info(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True))
     else:
         noise_model_new = noise_model
         

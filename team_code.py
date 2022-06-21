@@ -131,7 +131,7 @@ train_embs_negative_folder = train_embs_folder_murmur + os.path.sep + "negative"
 LOAD_TRAINED_MODELS = False
 TRAIN_NOISE_DETECTION = True
 
-NOISE_IMAGE_SIZE = [64, 64]
+NOISE_IMAGE_SIZE = [108, 108]
 RESHUFFLE_PATIENT_EMBS_N = 5
 MURMUR_IMAGE_SIZE = deepcopy(NOISE_IMAGE_SIZE)
 GENERATE_MEL_SPECTOGRAMS_TRAIN = True
@@ -142,6 +142,8 @@ RUN_AUTOKERAS_DECISION = True
 FINAL_TRAINING = False
 USE_COMPLEX_MODELS = True
 EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1 if not USE_COMPLEX_MODELS else -2
+
+WORKERS = os.cpu_count() - 1
 
 OHH_ARGS = None
 RUN_TEST = None
@@ -261,6 +263,7 @@ class OHHAutoModel(ak.AutoModel):
 # Load a WAV file.
 def load_wav_file_ohh(filename):
     frequency, recording = sp.io.wavfile.read(filename)
+    recording = recording / 2 ** (16 - 1)
     return recording, frequency
 
 def butter_bandpass(lowcut, highcut, fs, order=5):
@@ -272,7 +275,7 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
     return y
 
 def clean_frequency_heartbeat(wavfile_path):
-  x, sr_fake = librosa.load(wavfile_path, sr=REAL_SR)
+  x, sr_fake = load_wav_file_ohh(wavfile_path)
   sr = REAL_SR
   min_f = 20
   max_f = 786 #Reference: https://bmcpediatr.biomedcentral.com/track/pdf/10.1186/1471-2431-7-23.pdf
@@ -772,13 +775,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     # Noise model - Parameters found after runnign AutoKeras
     if TRAIN_NOISE_DETECTION:
-        batch_size = 4
+        batch_size = 2
             
         noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=0.2, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
         dataset_size = len(noise_detection_dataset_train_val)
         noise_detection_dataset_train_val = noise_detection_dataset_train_val.shuffle(buffer_size=dataset_size)
-        noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * 0.7))
-        noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * 0.7))
+        noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * 0.8))
+        noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * 0.8))
         noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=0.2, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
             
         if RUN_AUTOKERAS_NOISE:
@@ -810,7 +813,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 mode="max",
                 baseline=None,
                 restore_best_weights=True,
-            )], validation_data=noise_detection_dataset_val, workers= os.cpu_count() - 1)
+            )], validation_data=noise_detection_dataset_val, workers= WORKERS, 
+                    max_queue_size=15000, use_multiprocessing=True)
             
             noise_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
  
@@ -837,7 +841,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 mode="max",
                 baseline=None,
                 restore_best_weights=True,
-            )], validation_data=noise_detection_dataset_val, workers= os.cpu_count() - 1)
+            )], validation_data=noise_detection_dataset_val, workers= WORKERS)
 
         logger.info("Noise Model Classification Report")
         logger.info(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True))
@@ -994,7 +998,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     destiny_folder = test_negative_folder   
             destiny_folders.append(destiny_folder)      
         filepath_output_folder = zip(clean_files, destiny_folders)
-        pool = Pool(processes=(os.cpu_count() - 1))
+        pool = Pool(processes=(WORKERS))
         for _ in tqdm(pool.imap(generate_mel_wav_crops, filepath_output_folder), total=len(destiny_folders)):
             pass
         pool.close()
@@ -1062,7 +1066,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             mode="max",
             baseline=None,
             restore_best_weights=True
-        )], workers= os.cpu_count() - 1)
+        )], workers= WORKERS)
         murmur_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
   
     else:
@@ -1089,7 +1093,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             mode="max",
             baseline=None,
             restore_best_weights=True
-        )], workers= os.cpu_count() - 1)
+        )], workers= WORKERS)
     # murmur_model_new.set_weights(noise_model_new.get_weights())
     logger.info("Murmur Model Performance")
     logger.info(murmur_model_new.evaluate(murmur_detection_dataset_test, return_dict=True))
@@ -1181,7 +1185,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 mode="max",
                 baseline=None,
                 restore_best_weights=True
-            )], workers= os.cpu_count() - 1)
+            )], workers= WORKERS)
         murmur_decision_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
         
     else:
@@ -1196,7 +1200,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 mode="max",
                 baseline=None,
                 restore_best_weights=True
-            )], workers= os.cpu_count() - 1)
+            )], workers=WORKERS)
         
         logger.info("Murmur Detection Model Classification Report")
         logger.info(murmur_decision_new.evaluate(test_decision_dataset, return_dict=True))

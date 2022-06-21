@@ -1012,7 +1012,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     files_to_exclude = noise_murmur_df[noise_murmur_df["predictions"] > 0.5]
     logger.info("Remove noisy files")
-    if files_to_exclude.shape[0] > 0:
+    if not RUN_TEST and files_to_exclude.shape[0] > 0:
         for filepath in tqdm(files_to_exclude["filepath"]):
             os.remove(filepath)
     

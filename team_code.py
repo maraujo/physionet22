@@ -775,7 +775,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     # Noise model - Parameters found after runnign AutoKeras
     if TRAIN_NOISE_DETECTION:
-        batch_size = 2
+        batch_size = 8
             
         noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=0.2, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
         dataset_size = len(noise_detection_dataset_train_val)
@@ -783,6 +783,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
         noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * 0.8))
         noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * 0.8))
         noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=0.2, batch_size=batch_size, seed=42, image_size=NOISE_IMAGE_SIZE, )
+        
+        noise_detection_dataset_train = noise_detection_dataset_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        noise_detection_dataset_val = noise_detection_dataset_val.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        noise_detection_dataset_test = noise_detection_dataset_test.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
             
         if RUN_AUTOKERAS_NOISE:
             # model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
@@ -814,7 +818,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 baseline=None,
                 restore_best_weights=True,
             )], validation_data=noise_detection_dataset_val, workers= WORKERS, 
-                    max_queue_size=15000, use_multiprocessing=True)
+                    max_queue_size=15000, use_multiprocessing=False)
             
             noise_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
  

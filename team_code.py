@@ -142,13 +142,22 @@ FINAL_TRAINING = False
 USE_COMPLEX_MODELS = True
 EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1 if not USE_COMPLEX_MODELS else -2
 
+OHH_ARGS = None
+RUN_TEST = None
+if os.path.exists("ohh.config"):
+    import boto3
+    OHH_ARGS = open("ohh.config", "r").read().strip().split(" ")
+    s3 = boto3.client("s3",  aws_access_key_id=OHH_ARGS[0], aws_secret_access_key=OHH_ARGS[1])
+    RUN_TEST  = True if len(OHH_ARGS) > 2 and OHH_ARGS[2].strip() == "test" else False
 
-if False:
+if RUN_TEST:
+    logger.info("Running test")
     MURMUR_EPOCHS = 1
     NOISE_EPOCHS = 1
     MURMUR_DECISION_EPOCHS = 1
     MAX_TRIALS = 1
 else:
+    logger.info("Running full")
     MURMUR_EPOCHS = 1000
     NOISE_EPOCHS = 100
     MURMUR_DECISION_EPOCHS = 100
@@ -1154,7 +1163,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             input,
             output_node,
             project_name="auto_model",
-            max_trials=100,
+            max_trials=MAX_TRIALS,
             directory=None,
             tuner="bayesian",
             overwrite=True,
@@ -1361,6 +1370,11 @@ def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decisio
         "NOISE_IMAGE_SIZE" : NOISE_IMAGE_SIZE,
         "MURMUR_IMAGE_SIZE" : MURMUR_IMAGE_SIZE
     }).to_pickle(os.path.join(model_folder, "models_info.pickle"))
+    
+    if OHH_ARGS:
+        destinypath = "/tmp/models-{}.tar.gz".format(str(uuid.uuid4()))
+        os.system("tar -cvzf /tmp/models-{}.tar.gz {}".format(model_folder))
+        response = s3.upload_file(destinypath, "1hh-algorithm-dev", "models/" + os.path.basename(destinypath))
 
 def get_murmur_decision_model_configs():
     murmur_decision_config = {'name': 'model', 'layers': [{'class_name': 'InputLayer', 'config': {'batch_input_shape': (None, EMBS_SIZE * EMBDS_PER_PATIENTS), 'dtype': 'float32', 'sparse': False, 'ragged': False, 'name': 'input_1'}, 'name': 'input_1', 'inbound_nodes': []}, {'class_name': 'Custom>CastToFloat32', 'config': {'name': 'cast_to_float32', 'trainable': True, 'dtype': 'float32'}, 'name': 'cast_to_float32', 'inbound_nodes': [[['input_1', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense', 'trainable': True, 'dtype': 'float32', 'units': 1024, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': None}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense', 'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]]}, {'class_name': 'ReLU', 'config': {'name': 're_lu', 'trainable': True, 'dtype': 'float32', 'max_value': None, 'negative_slope': array(0., dtype=float32), 'threshold': array(0., dtype=float32)}, 'name': 're_lu', 'inbound_nodes': [[['dense', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense_1', 'trainable': True, 'dtype': 'float32', 'units': 1, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': None}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense_1', 'inbound_nodes': [[['re_lu', 0, 0, {}]]]}, {'class_name': 'Activation', 'config': {'name': 'classification_head_1', 'trainable': True, 'dtype': 'float32', 'activation': 'sigmoid'}, 'name': 'classification_head_1', 'inbound_nodes': [[['dense_1', 0, 0, {}]]]}], 'input_layers': [['input_1', 0, 0]], 'output_layers': [['classification_head_1', 0, 0]]}

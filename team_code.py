@@ -33,6 +33,7 @@ import glob
 from autokeras.keras_layers import CastToFloat32
 from sklearn.preprocessing import OneHotEncoder
 from uuid import uuid4
+import uuid
 import shutil
 import tensorflow_datasets as tfds
 from sklearn.preprocessing import OneHotEncoder
@@ -49,7 +50,7 @@ tf.data.experimental.enable_debug_mode()
 #
 ################################################################################
 
-
+import json
 import librosa
 import IPython.display as ipd
 from scipy.signal import butter, lfilter
@@ -146,9 +147,9 @@ OHH_ARGS = None
 RUN_TEST = None
 if os.path.exists("ohh.config"):
     import boto3
-    OHH_ARGS = open("ohh.config", "r").read().strip().split(" ")
-    s3 = boto3.client("s3",  aws_access_key_id=OHH_ARGS[0], aws_secret_access_key=OHH_ARGS[1])
-    RUN_TEST  = True if len(OHH_ARGS) > 2 and OHH_ARGS[2].strip() == "test" else False
+    OHH_ARGS = json.loads(open("ohh.config", "r").read().strip())
+    s3 = boto3.client("s3",  aws_access_key_id=OHH_ARGS["AWS_ID"], aws_secret_access_key=OHH_ARGS["AWS_PASS"])
+    RUN_TEST  = OHH_ARGS["TEST_MODE"]
 
 if RUN_TEST:
     logger.info("Running test")
@@ -1373,7 +1374,7 @@ def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decisio
     
     if OHH_ARGS:
         destinypath = "/tmp/models-{}.tar.gz".format(str(uuid.uuid4()))
-        os.system("tar -cvzf /tmp/models-{}.tar.gz {}".format(model_folder))
+        os.system("tar -cvzf {} {}".format(destinypath, model_folder))
         response = s3.upload_file(destinypath, "1hh-algorithm-dev", "models/" + os.path.basename(destinypath))
 
 def get_murmur_decision_model_configs():

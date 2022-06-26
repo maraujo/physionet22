@@ -17,7 +17,7 @@ os.system("mkdir -p /physionet_data/challenge/files/cross-validation-data-1-0-3/
 os.system("mkdir -p /physionet_data/challenge/files/circor-heart-sound/1.0.3/")
 os.system("git clone https://matheus:{}@github.com/maraujo/physionet22.git".format(github_token))
 os.system("pip install -r ./physionet22/requirements.txt")
-os.system("pip install tensorflow==2.8")
+os.system("pip install tensorflow==2.8.2")
 
 import boto3
 

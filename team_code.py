@@ -1034,7 +1034,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     destiny_folder = test_negative_folder   
             destiny_folders.append(destiny_folder)      
         filepath_output_folder = zip(clean_files, destiny_folders)
-        pool = Pool(processes=(WORKERS))
+        pool = Pool(processes=(min(WORKERS, 4)))
         for _ in tqdm(pool.imap(generate_mel_wav_crops, filepath_output_folder), total=len(destiny_folders)):
             pass
         pool.close()

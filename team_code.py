@@ -108,6 +108,8 @@ train_negative_folder = train_folder_murmur + os.path.sep + "negative"
 train_outcome_folder = "train_outcome_folder"
 test_outcome_folder = "test_outcome_folder"
 val_outcome_folder = "val_outcome_folder"
+TRAIN_FRAC = 0.8
+VAL_FRAC_MURMUR = 0.3
 
 val_outcome_positive_folder = val_outcome_folder + os.path.sep + "positive"
 val_outcome_negative_folder = val_outcome_folder + os.path.sep + "negative"
@@ -143,7 +145,7 @@ EMBS_SIZE = 64
 RUN_AUTOKERAS_NOISE = False
 RUN_AUTOKERAS_MURMUR = False
 RUN_AUTOKERAS_DECISION = False
-FINAL_TRAINING = False
+FINAL_TRAINING = True
 USE_COMPLEX_MODELS = True
 EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1 if not USE_COMPLEX_MODELS else -2
 
@@ -888,7 +890,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             noise_detection_dataset_train = ak.image_dataset_from_directory(
                 NOISE_DETECTION_IMGS_PATH,
                 # Use 20% data as testing data.
-                validation_split=0.2,
+                validation_split=1 - TRAIN_FRAC,
                 subset="training",
                 # Set seed to ensure the same split when loading testing data.
                 seed=42,
@@ -898,7 +900,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
             noise_detection_dataset_test = ak.image_dataset_from_directory(
                 NOISE_DETECTION_IMGS_PATH,
-                validation_split=0.2,
+                validation_split=1 - TRAIN_FRAC,
                 subset="validation",
                 seed=42,
                 image_size=NOISE_IMAGE_SIZE,
@@ -926,11 +928,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
             
  
         else:
-            noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=0.2, seed=42, image_size=NOISE_IMAGE_SIZE)
+            noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=1 - TRAIN_FRAC, seed=42, image_size=NOISE_IMAGE_SIZE)
             dataset_size = len(noise_detection_dataset_train_val)
-            noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * 0.8))
-            noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * 0.8))
-            noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=0.2, seed=42, image_size=NOISE_IMAGE_SIZE)
+            noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * TRAIN_FRAC))
+            noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * TRAIN_FRAC))
+            noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=1 - TRAIN_FRAC, seed=42, image_size=NOISE_IMAGE_SIZE)
             
                
             # noise_detection_dataset_train = noise_detection_dataset_train.batch(batch_size,drop_remainder=True)        
@@ -1071,9 +1073,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     })
     
     unique_original_files = pd.Series(pd.Series(patient_ids).unique())
-    test_set = unique_original_files.sample(frac=0.2, random_state=42)
+    test_set = unique_original_files.sample(frac=1-TRAIN_FRAC, random_state=42)
     train_val_set = unique_original_files[~unique_original_files.isin(test_set)]
-    train_set = train_val_set.sample(frac=0.8, random_state=42)
+    train_set = train_val_set.sample(frac=(1 - VAL_FRAC_MURMUR), random_state=42)
     val_set = train_val_set[~train_val_set.isin(train_set)]
     
     if GENERATE_MEL_SPECTOGRAMS_TRAIN:

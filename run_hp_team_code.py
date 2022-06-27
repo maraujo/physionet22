@@ -54,7 +54,7 @@ def run_model():
     os.system("rm -r recordings_aux")
     os.system("rm -r test_outputs")
     performances = []
-    for run_number in range(5):
+    for run_number in range(1):
         os.system("bash run_train_full.bash {}".format(run_number))
         current_performance = get_current_performace()
         performances.append(current_performance)

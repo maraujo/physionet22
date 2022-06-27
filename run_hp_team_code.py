@@ -1,6 +1,7 @@
 import os
 from collections import OrderedDict
 import json
+from loguru import logger
 
 # Embs Size : [16, 64, 256]
 # Weight class murmur : [1, 1.5, 3, 5]
@@ -43,7 +44,9 @@ def create_configfile_given_cofig(config):
     ptr.write(json_object)
 
 def get_current_performace():
-    data = json.load("decision_evaluation.json")
+    data = None
+    with open("decision_evaluation.json") as json_file:
+        data = json.load(json_file)
     return data["auc"]
 
 def run_model():
@@ -55,9 +58,14 @@ for parameter_name in parameters.keys():
     for value in parameters_values:
         tentative_config = base.copy()
         tentative_config[parameter_name] = value
+        logger.info("New Tentative: {} - {}", parameter_name, parameters_values)
+        logger.info("Current Base: {}".format(base))
         create_configfile_given_cofig(tentative_config)
         run_model()
         current_performance = get_current_performace()
+        logger.info("Previous performance: {}".format(base["performance"]))
+        logger.info("New performance: {}".format(base["current_performance"]))
         if base["performance"] < current_performance:
+            logger.info("Updated.")
             base["performance"] = current_performance
             base[parameter_name] = value

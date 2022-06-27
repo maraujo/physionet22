@@ -1470,7 +1470,7 @@ def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decisio
 def get_murmur_decision_model():
     config = {'input_layers': [['input_1', 0, 0]],
  'layers': [{'class_name': 'InputLayer',
-   'config': {'batch_input_shape': (None, 8832),
+   'config': {'batch_input_shape': (None, EMBS_SIZE * EMBDS_PER_PATIENTS),
     'dtype': 'float32',
     'name': 'input_1',
     'ragged': False,

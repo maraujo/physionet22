@@ -2,6 +2,7 @@ import os
 from collections import OrderedDict
 import json
 from loguru import logger
+import statistics
 
 # Embs Size : [16, 64, 256]
 # Weight class murmur : [1, 1.5, 3, 5]
@@ -37,23 +38,31 @@ base = {
 }
 
 def create_configfile_given_cofig(config):
-    base_config = { "TEST_MODE": True }
+    base_config = { "TEST_MODE": False }
     base_config.update(config)
     json_object = json.dumps(base_config, indent = 4) 
     ptr = open("ohh.config", "w")
     ptr.write(json_object)
 
-def get_current_performace():
+def  get_current_performace():
     data = None
     with open("decision_evaluation.json") as json_file:
         data = json.load(json_file)
-    return data["auc"]
+    return data["compute_weighted_accuracy"]
 
 def run_model():
-    # os.system("bash run_train_full.bash 0")
     os.system("rm -r recordings_aux")
     os.system("rm -r test_outputs")
-    os.system("bash test_code_quick.bash 0")
+    performances = []
+    for run_number in range(5):
+        os.system("bash run_train_full.bash {}".format(run_number))
+        current_performance = get_current_performace()
+        performances.append(current_performance)
+        logger.info("Run {} - Performance: {}".format(run_number, current_performance))
+    return statistics.mean(performances)
+    
+        
+    # os.system("bash test_code_quick.bash 0")
 
 for parameter_name in parameters.keys():
     parameters_values = parameters[parameter_name]
@@ -63,8 +72,7 @@ for parameter_name in parameters.keys():
         logger.info("New Tentative: {} - {}", parameter_name, value)
         logger.info("Current Base: {}".format(base))
         create_configfile_given_cofig(tentative_config)
-        run_model()
-        current_performance = get_current_performace()
+        current_performance = run_model()
         logger.info("Previous performance: {}".format(base["performance"]))
         logger.info("New performance: {}".format(current_performance))
         if base["performance"] < current_performance:

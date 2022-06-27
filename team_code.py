@@ -1365,6 +1365,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             hp.hparams(hparams)  # record the values used in this trial
             tf.summary.scalar("auc", decision_evaluation["auc"], step=1)
             tf.summary.scalar("auc_roc", decision_evaluation["auc_roc"], step=1)
+            tf.summary.scalar("compute_weighted_accuracy", decision_evaluation["compute_weighted_accuracy"], step=1)
         
     tf.keras.models.save_model(
                 murmur_decision_new,

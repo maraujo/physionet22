@@ -346,6 +346,23 @@ def generate_mel_image(x, sr, hop_length=128):
   pil_image = PIL.Image.frombytes('RGB', temp_canvas.get_width_height(),  temp_canvas.tostring_rgb())
   return pil_image
 
+def generate_mel_image_v2(x, sr, hop_length=128):
+  total_duration = len(x)/sr 
+  fig, ax = plt.subplots(nrows=1, sharex=True, figsize=(FIGURE_SIZE, FIGURE_SIZE))
+  ax.axes.xaxis.set_visible(False)
+  ax.axes.yaxis.set_visible(False)
+  M = librosa.feature.melspectrogram(y=x, sr=sr, n_fft=256, hop_length=hop_length)
+  cmap = 'gist_ncar'
+  # cmap = "nipy_spectral"
+  sns.heatmap(pd.DataFrame(librosa.power_to_db(M, ref=np.max))[::-1], cmap=cmap, ax=ax, cbar=False)
+  plt.gca().set_axis_off()
+  plt.subplots_adjust(top = 1, bottom = 0, right = 1, left = 0, 
+              hspace = 0, wspace = 0)
+  plt.margins(0,0)
+  # ax.set_xlim([2, 4])
+  ax.set_frame_on(False)
+  return fig, ax
+
 def generate_mel_wav_crops(filepath_output_folder):
     filepath, output_folder = filepath_output_folder
     seconds_window = 2
@@ -373,6 +390,42 @@ def generate_mel_wav_crops(filepath_output_folder):
         del x
         del sr
   # librosa.cache.clear()
+
+def generate_mel_wav_crops_v2(filepath_output_folder):
+    filepath, output_folder = filepath_output_folder
+    seconds_window = 2
+    # print(filepath)
+    if output_folder:
+        x, sr_fake = librosa.load(filepath, sr=REAL_SR)
+        sr = REAL_SR
+        duration_seconds = len(x)/sr
+        fig_image, ax_image = generate_mel_image_v2(x, sr, hop_length=32)
+        ax_width = ax_image.get_xlim()[1]
+        for end_time in range(seconds_window, math.floor(duration_seconds), seconds_window):
+            # Crop sound
+            start_time = end_time - seconds_window
+            image_begin = (ax_width / duration_seconds) * start_time
+            image_end = image_begin + (ax_width / duration_seconds) * (seconds_window) 
+            # x_cut = x[start_time*sr: start_time*sr + seconds_window*sr]
+            ax_image.set_xlim(image_begin, image_end)
+            fig_image.canvas.draw()
+            temp_canvas = fig_image.canvas
+            pil_image = PIL.Image.frombytes('RGB', temp_canvas.get_width_height(),  temp_canvas.tostring_rgb())
+            # pil_image = generate_mel_image(x_cut, sr, hop_length=32)
+            output_filepath_prefix = output_folder.strip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
+            output_filepath_wav =  output_filepath_prefix + ".wav" 
+            output_filepath_image = output_filepath_prefix + ".png" 
+            # librosa.output.write_wav(filepath, x_cut, sr, norm=True)
+            # x_cut = librosa.util.normalize(x_cut)
+            pil_image.save(output_filepath_image)
+            
+            # sf.write(output_filepath_wav, x_cut, sr, 'PCM_16')
+            pil_image.close()
+            del pil_image
+        fig_image.clf()
+        plt.close()
+        del x
+        del sr
 
 def generate_data_json_file(folder):
   wavfiles = glob.glob(folder.strip("/") + os.path.sep + "*.wav")
@@ -710,6 +763,17 @@ def compute_confusion_matrix(labels, outputs):
                     A[i, j] += 1
 
     return A
+
+class ComputedWeightedAccuracy(tf.keras.metrics.Metric):
+  def __init__(self, name='computed_weighted_accuracy', **kwargs):
+    super(ComputedWeightedAccuracy, self).__init__(name=name, **kwargs)
+    self.computed_weighted_accuracy = self.add_weight(name='cwa', initializer='zeros')
+
+  def update_state(self, y_true, y_pred, sample_weight=None):
+    cwa = compute_weighted_accuracy(y_true, y_pred, classes = ["Abnormal", "Normal"])
+    self.computed_weighted_accuracy.assign(cwa)
+  def result(self):
+    return self.computed_weighted_accuracy
 
 # Compute accuracy.
 def compute_weighted_accuracy(labels, outputs, classes = ["Abnormal", "Normal"]):
@@ -1067,8 +1131,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     destiny_folder = test_negative_folder   
             destiny_folders.append(destiny_folder)      
         filepath_output_folder = zip(clean_files, destiny_folders)
-        pool = Pool(processes=(min(WORKERS, 4)))
-        for _ in tqdm(pool.imap(generate_mel_wav_crops, filepath_output_folder), total=len(destiny_folders)):
+        # for args_filepath in tqdm(filepath_output_folder):
+        #     generate_mel_wav_crops_v2(args_filepath)
+        pool = Pool(processes=(min(WORKERS, 8)))
+        for _ in tqdm(pool.imap(generate_mel_wav_crops_v2, filepath_output_folder), total=len(destiny_folders)):
             pass
         pool.close()
 

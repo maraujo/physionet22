@@ -64,6 +64,8 @@ import librosa.display
 import math
 
 import seaborn as sns
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -145,7 +147,7 @@ EMBS_SIZE = 64
 RUN_AUTOKERAS_NOISE = False
 RUN_AUTOKERAS_MURMUR = False
 RUN_AUTOKERAS_DECISION = False
-FINAL_TRAINING = True
+FINAL_TRAINING = False
 USE_COMPLEX_MODELS = True
 EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1 if not USE_COMPLEX_MODELS else -2
 
@@ -348,9 +350,9 @@ def generate_mel_image(x, sr, hop_length=128):
   pil_image = PIL.Image.frombytes('RGB', temp_canvas.get_width_height(),  temp_canvas.tostring_rgb())
   return pil_image
 
-def generate_mel_image_v2(x, sr, hop_length=128):
+def generate_mel_image_v2(x, sr, seconds_window, hop_length=128):
   total_duration = len(x)/sr 
-  fig, ax = plt.subplots(nrows=1, sharex=True, figsize=(FIGURE_SIZE, FIGURE_SIZE))
+  fig, ax = plt.subplots(nrows=1, sharex=True, figsize=(FIGURE_SIZE * total_duration / seconds_window, FIGURE_SIZE))
   ax.axes.xaxis.set_visible(False)
   ax.axes.yaxis.set_visible(False)
   M = librosa.feature.melspectrogram(y=x, sr=sr, n_fft=256, hop_length=hop_length)
@@ -401,18 +403,19 @@ def generate_mel_wav_crops_v2(filepath_output_folder):
         x, sr_fake = librosa.load(filepath, sr=REAL_SR)
         sr = REAL_SR
         duration_seconds = len(x)/sr
-        fig_image, ax_image = generate_mel_image_v2(x, sr, hop_length=32)
+        fig_image, ax_image = generate_mel_image_v2(x, sr, seconds_window, hop_length=32)
         ax_width = ax_image.get_xlim()[1]
+        fig_image.canvas.draw()
+        temp_canvas = fig_image.canvas
+        pil_image_full = PIL.Image.frombytes('RGB', temp_canvas.get_width_height(),  temp_canvas.tostring_rgb())
+        pil_image_width, pil_image_height = pil_image_full.size
         for end_time in range(seconds_window, math.floor(duration_seconds), seconds_window):
             # Crop sound
             start_time = end_time - seconds_window
-            image_begin = (ax_width / duration_seconds) * start_time
-            image_end = image_begin + (ax_width / duration_seconds) * (seconds_window) 
+            image_begin = (pil_image_width / duration_seconds) * start_time
+            image_end = image_begin + (pil_image_width / duration_seconds) * (seconds_window) 
             # x_cut = x[start_time*sr: start_time*sr + seconds_window*sr]
-            ax_image.set_xlim(image_begin, image_end)
-            fig_image.canvas.draw()
-            temp_canvas = fig_image.canvas
-            pil_image = PIL.Image.frombytes('RGB', temp_canvas.get_width_height(),  temp_canvas.tostring_rgb())
+            pil_image = pil_image_full.crop((image_begin, 0, image_end, pil_image_height))
             # pil_image = generate_mel_image(x_cut, sr, hop_length=32)
             output_filepath_prefix = output_folder.strip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
             output_filepath_wav =  output_filepath_prefix + ".wav" 

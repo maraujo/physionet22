@@ -1282,7 +1282,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         fptr = open('decision_evaluation.json', 'w')
         fptr.write(json_opject)
         fptr.close()
-        with tf.summary.create_file_writer("logs_hparams").as_default():
+        with tf.summary.create_file_writer("logs_hparams/{}".format(get_unique_name())).as_default():
             hparams = {
                 "EMBS_SIZE" : EMBS_SIZE,
                 "class_weight_murmur" : class_weight_murmur[1],
@@ -1642,7 +1642,7 @@ def get_murmur_model():
                     classifier_activation='None'
                     )
     noise_layer_4 = tf.keras.layers.GlobalAveragePooling2D.from_config(noise_global_average_config)
-    noise_layer_embs = tf.keras.layers.Dense(64, activation="linear",name="dense_embs")
+    noise_layer_embs = tf.keras.layers.Dense(EMBS_SIZE, activation="linear",name="dense_embs")
     noise_layer_5 = tf.keras.layers.Dense.from_config(noise_dense_config)
     noise_layer_6 = tf.keras.layers.Activation.from_config(noise_classification_head_config)
     

@@ -33,7 +33,7 @@ base = {
     "murmur_image_size" : 108,
     "weight_class_murmur" : 1,
     "weight_class_decisions" : 1.5,
-    "performance" : 0
+    "performance" : 0.0
 }
 
 def create_configfile_given_cofig(config):
@@ -51,6 +51,8 @@ def get_current_performace():
 
 def run_model():
     # os.system("bash run_train_full.bash 0")
+    os.system("rm -r recordings_aux")
+    os.system("rm -r test_outputs")
     os.system("bash test_code_quick.bash 0")
 
 for parameter_name in parameters.keys():
@@ -58,13 +60,13 @@ for parameter_name in parameters.keys():
     for value in parameters_values:
         tentative_config = base.copy()
         tentative_config[parameter_name] = value
-        logger.info("New Tentative: {} - {}", parameter_name, parameters_values)
+        logger.info("New Tentative: {} - {}", parameter_name, value)
         logger.info("Current Base: {}".format(base))
         create_configfile_given_cofig(tentative_config)
         run_model()
         current_performance = get_current_performace()
         logger.info("Previous performance: {}".format(base["performance"]))
-        logger.info("New performance: {}".format(base["current_performance"]))
+        logger.info("New performance: {}".format(current_performance))
         if base["performance"] < current_performance:
             logger.info("Updated.")
             base["performance"] = current_performance

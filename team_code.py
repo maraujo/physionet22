@@ -176,6 +176,13 @@ if os.path.exists("ohh.config"):
         class_weight_murmur[1] =  OHH_ARGS["weight_class_murmur"]
     if "weight_class_decisions" in OHH_ARGS:
         class_weight_decision[1] =  OHH_ARGS["weight_class_decisions"]
+    
+    logger.info("Embs Size: {}" .format(EMBS_SIZE))
+    logger.info("Weight class murmur: {}" .format(class_weight_murmur))
+    logger.info("Weight class decision: {}" .format(class_weight_decision))
+    logger.info("Murmur Image Size: {}" .format(MURMUR_IMAGE_SIZE))
+    logger.info("Random embeddings per patient: {}" .format(RESHUFFLE_PATIENT_EMBS_N))
+    logger.info("Reshuffle for training: {}" .format(RESHUFFLE_PATIENT_EMBS_N))
 
     # Embs Size : [16, 64, 256]
     # Weight class murmur : [1, 1.5, 3, 5]

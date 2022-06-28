@@ -1289,7 +1289,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # generate_patient_embeddings_folder_v2(patient_id, patient_row["split"], patient_row["label"], patient_embs["embs"])
     # embs_train, labels_train = load_embs_labels(train_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
     # embs_val, labels_val = load_embs_labels(val_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
-    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).batch(1)
+    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).shuffle(buffer_size=200).batch(RESHUFFLE_PATIENT_EMBS_N)
     val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), embs_label_val)).batch(1)
     test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), embs_label_test)).batch(1)
     
@@ -1337,10 +1337,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_decision_new = Functional.from_config(murmur_decision_config) 
             murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 2e-05,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
-        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, steps_per_epoch = 200, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_compute_weighted_accuracy",
                 min_delta=0,
-                patience=10,
+                patience=20,
                 verbose=0,
                 mode="max",
                 baseline=None,
@@ -1589,6 +1589,16 @@ def get_murmur_decision_model():
    'inbound_nodes': [[['dense', 0, 0, {}]]],
    'name': 're_lu'},
   
+  {'class_name': 'Dropout',
+   'config': {'dtype': 'float32',
+    'name': 'dropout',
+    'noise_shape': None,
+    'rate': 0.25,
+    'seed': 42,
+    'trainable': True},
+   'inbound_nodes': [[['re_lu', 0, 0, {}]]],
+   'name': 'dropout'},
+  
   {'class_name': 'Dense',
    'config': {'activation': 'linear',
     'activity_regularizer': None,
@@ -1604,7 +1614,7 @@ def get_murmur_decision_model():
     'trainable': True,
     'units': 1,
     'use_bias': True},
-   'inbound_nodes': [[['re_lu', 0, 0, {}]]],
+   'inbound_nodes': [[['dropout', 0, 0, {}]]],
    'name': 'dense_3'},
   {'class_name': 'Activation',
    'config': {'activation': 'sigmoid',

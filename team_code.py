@@ -1289,9 +1289,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # generate_patient_embeddings_folder_v2(patient_id, patient_row["split"], patient_row["label"], patient_embs["embs"])
     # embs_train, labels_train = load_embs_labels(train_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
     # embs_val, labels_val = load_embs_labels(val_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
-    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).batch(4)
-    val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), embs_label_val)).batch(4)
-    test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), embs_label_test)).batch(4)
+    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).batch(1)
+    val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), embs_label_val)).batch(1)
+    test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), embs_label_test)).batch(1)
     
     #TODO have simple version for this
     
@@ -1340,7 +1340,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_compute_weighted_accuracy",
                 min_delta=0,
-                patience=30,
+                patience=10,
                 verbose=0,
                 mode="max",
                 baseline=None,
@@ -1573,11 +1573,38 @@ def get_murmur_decision_model():
     'kernel_initializer': {'class_name': 'GlorotUniform',
      'config': {'seed': None}},
     'kernel_regularizer': None,
+    'name': 'dense',
+    'trainable': True,
+    'units': 16,
+    'use_bias': True},
+   'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]],
+   'name': 'dense'},
+  {'class_name': 'ReLU',
+   'config': {'dtype': 'float32',
+    'max_value': None,
+    'name': 're_lu',
+    'negative_slope': array(0., dtype=float32),
+    'threshold': array(0., dtype=float32),
+    'trainable': True},
+   'inbound_nodes': [[['dense', 0, 0, {}]]],
+   'name': 're_lu'},
+  
+  {'class_name': 'Dense',
+   'config': {'activation': 'linear',
+    'activity_regularizer': None,
+    'bias_constraint': None,
+    'bias_initializer': {'class_name': 'Zeros', 'config': {}},
+    'bias_regularizer': None,
+    'dtype': 'float32',
+    'kernel_constraint': None,
+    'kernel_initializer': {'class_name': 'GlorotUniform',
+     'config': {'seed': None}},
+    'kernel_regularizer': None,
     'name': 'dense_3',
     'trainable': True,
     'units': 1,
     'use_bias': True},
-   'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]],
+   'inbound_nodes': [[['re_lu', 0, 0, {}]]],
    'name': 'dense_3'},
   {'class_name': 'Activation',
    'config': {'activation': 'sigmoid',

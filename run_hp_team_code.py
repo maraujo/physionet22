@@ -11,24 +11,24 @@ import statistics
 # Random embeddings per patient: [15, 50, 100, 128]
 # Reshuffle for training: [1, 3, 5, 10]
 embs_sizes = [16, 64, 256]
-reshuffle_patients = [1, 3, 5, 10]
-embs_per_patients = [15, 50, 100, 150]
-murmur_image_sizes = [32, 72, 108, 216]
+reshuffle_patients = [1, 3, 10]
+embs_per_patients = [15, 100, 150]
+murmur_image_sizes = [32, 108, 300]
 weight_class_murmurs = [1, 1.5, 3, 5]
 weight_class_decisions = [1, 1.5, 3, 5]
 parameters = OrderedDict()
-parameters["embs_size"] = embs_sizes
 parameters["reshuffle_patients"] = reshuffle_patients
 parameters["embs_per_patients"] = embs_per_patients
 parameters["murmur_image_sizes"] = murmur_image_sizes
 parameters["weight_class_murmur"] = weight_class_murmurs
 parameters["weight_class_decisions"] = weight_class_decisions
+parameters["embs_size"] = embs_sizes
 
 
 best_embs = {"best_param": None, "performance" : 0}
 
 base = {
-    "embs_size" : 64,
+    "embs_size" : 264,
     "reshuffle_patient" : 1,
     "embs_per_patient" : 15,
     "murmur_image_size" : 108,

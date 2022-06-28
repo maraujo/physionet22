@@ -26,5 +26,5 @@ tensorflow-io-gcs-filesystem==0.26.0
 tensorflow-metadata==1.8.0
 tensorflow-probability==0.16.0
 tensorflow-addons==0.16.1
-awscli==1.25.16
+awscli==1.25.18
 psutil==5.9.1

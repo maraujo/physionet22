@@ -1252,20 +1252,27 @@ def train_challenge_model(data_folder, model_folder, verbose):
     
     # Generating embeddings
     logger.info("Loading all images...")
-    murmur_model_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=MURMUR_IMAGE_SIZE, shuffle=False)
+    murmur_model_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", seed=42, image_size=MURMUR_IMAGE_SIZE, shuffle=False)
+    train_filepaths = murmur_model_dataset_train.file_paths
+    murmur_model_dataset_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
     murmur_murmur_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=MURMUR_IMAGE_SIZE, shuffle=False )
+    val_filepaths = murmur_murmur_dataset_val.file_paths
+    murmur_murmur_dataset_val.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
     murmur_murmur_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=MURMUR_IMAGE_SIZE, shuffle=False )
-    murmur_model_dataset_all = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val).concatenate(murmur_murmur_dataset_test)
+    test_filepaths = murmur_murmur_dataset_test.file_paths
+    murmur_murmur_dataset_test.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+    # murmur_model_dataset_all = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val).concatenate(murmur_murmur_dataset_test)
     # all_murmur_files_series = pd.Series(glob.glob(os.path.join(train_folder_murmur, "**/*.png")) + glob.glob(os.path.join(val_folder_murmur, "**/*.png")) + glob.glob(os.path.join(test_folder_murmur, "**/*.png")))
     # all_murmur_files_images = all_murmur_files_series.apply(load_image_array)
     logger.info("Predicting for all images...")
-    file_paths = murmur_model_dataset_all.file_paths
-    all_murmur_files_embs = murmur_embedding_model.predict(murmur_model_dataset_all)
-    # del all_murmur_files_images
     import ipdb;ipdb.set_trace()
     pass
-    patient_ids = file_paths.apply(lambda x: x.split("/")[2].split("_")[0])
-    embs_df = pd.DataFrame({"filepath"  : file_paths, "embs" : all_murmur_files_embs.tolist(), "patient_id": patient_ids})
+    all_file_paths = train_filepaths + val_filepaths + test_filepaths
+    all_murmur_files_embs = np.vstack((murmur_embedding_model.predict(murmur_model_dataset_train), murmur_embedding_model.predict(murmur_model_dataset_val), murmur_embedding_model.predict(murmur_model_dataset_test)))
+    # del all_murmur_files_images
+    
+    patient_ids = all_file_paths.apply(lambda x: x.split("/")[2].split("_")[0])
+    embs_df = pd.DataFrame({"filepath"  : all_file_paths, "embs" : all_murmur_files_embs.tolist(), "patient_id": patient_ids})
     
     embs_train = []
     embs_label_train = []
@@ -1646,6 +1653,7 @@ def get_murmur_decision_model_configs():
     return murmur_decision_config
 
 def get_murmur_model():
+    
     noise_input_config = {'batch_input_shape': (None, MURMUR_IMAGE_SIZE[0], MURMUR_IMAGE_SIZE[1], 3),  'dtype': 'float32',  'name': 'input_1', 'ragged': False, 'sparse': False }
     noise_cast_to_float_config = {'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}
 

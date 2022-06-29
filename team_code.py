@@ -111,7 +111,7 @@ train_outcome_folder = "train_outcome_folder"
 test_outcome_folder = "test_outcome_folder"
 val_outcome_folder = "val_outcome_folder"
 TRAIN_FRAC = 0.8
-VAL_FRAC_MURMUR = 0.3
+VAL_FRAC_MURMUR = 0.4
 
 val_outcome_positive_folder = val_outcome_folder + os.path.sep + "positive"
 val_outcome_negative_folder = val_outcome_folder + os.path.sep + "negative"
@@ -1222,7 +1222,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_model_new.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
         else:
             murmur_model_new = tf.keras.models.clone_model(noise_model_new)
-            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.SigmoidFocalCrossEntropy(), metrics=get_all_metrics())
+            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.ContrastiveLoss(), metrics=get_all_metrics())
         
         murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
                              epochs = MURMUR_EPOCHS, max_queue_size=MAX_QUEUE, class_weight=class_weight_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
@@ -1252,13 +1252,20 @@ def train_challenge_model(data_folder, model_folder, verbose):
     
     # Generating embeddings
     logger.info("Loading all images...")
-    all_murmur_files_series = pd.Series(glob.glob(os.path.join(train_folder_murmur, "**/*.png")) + glob.glob(os.path.join(val_folder_murmur, "**/*.png")) + glob.glob(os.path.join(test_folder_murmur, "**/*.png")))
-    all_murmur_files_images = all_murmur_files_series.apply(load_image_array)
+    murmur_model_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=MURMUR_IMAGE_SIZE, shuffle=False)
+    murmur_murmur_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=MURMUR_IMAGE_SIZE, shuffle=False )
+    murmur_murmur_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=MURMUR_IMAGE_SIZE, shuffle=False )
+    murmur_model_dataset_all = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val).concatenate(murmur_murmur_dataset_test)
+    # all_murmur_files_series = pd.Series(glob.glob(os.path.join(train_folder_murmur, "**/*.png")) + glob.glob(os.path.join(val_folder_murmur, "**/*.png")) + glob.glob(os.path.join(test_folder_murmur, "**/*.png")))
+    # all_murmur_files_images = all_murmur_files_series.apply(load_image_array)
     logger.info("Predicting for all images...")
-    all_murmur_files_embs = murmur_embedding_model.predict(np.vstack(all_murmur_files_images.values))
-    del all_murmur_files_images
-    patient_ids = all_murmur_files_series.apply(lambda x: x.split("/")[2].split("_")[0])
-    embs_df = pd.DataFrame({"filepath"  : all_murmur_files_series, "embs" : all_murmur_files_embs.tolist(), "patient_id": patient_ids})
+    file_paths = murmur_model_dataset_all.file_paths
+    all_murmur_files_embs = murmur_embedding_model.predict(murmur_model_dataset_all)
+    # del all_murmur_files_images
+    import ipdb;ipdb.set_trace()
+    pass
+    patient_ids = file_paths.apply(lambda x: x.split("/")[2].split("_")[0])
+    embs_df = pd.DataFrame({"filepath"  : file_paths, "embs" : all_murmur_files_embs.tolist(), "patient_id": patient_ids})
     
     embs_train = []
     embs_label_train = []
@@ -1661,7 +1668,7 @@ def get_murmur_model():
     noise_layer_5 = tf.keras.layers.Dense.from_config(noise_dense_config)
     noise_layer_6 = tf.keras.layers.Activation.from_config(noise_classification_head_config)
     
-    murmur_model = tf.keras.Sequential([noise_layer_0, noise_layer_1, noise_layer_3,  
+    murmur_model = tf.keras.Sequential([noise_layer_0, noise_layer_1, tf.keras.layers.Rescaling(1./127.5), noise_layer_3,  
     noise_layer_4, noise_layer_embs, noise_layer_5, noise_layer_6])
     return murmur_model
 

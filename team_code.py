@@ -1251,8 +1251,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
     murmur_embedding_model = tf.keras.models.Sequential(murmur_model_new.layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
     
     # Generating embeddings
+    logger.info("Loading all images...")
     all_murmur_files_series = pd.Series(glob.glob(os.path.join(train_folder_murmur, "**/*.png")) + glob.glob(os.path.join(val_folder_murmur, "**/*.png")) + glob.glob(os.path.join(test_folder_murmur, "**/*.png")))
     all_murmur_files_images = all_murmur_files_series.apply(load_image_array)
+    logger.info("Predicting for all images...")
     all_murmur_files_embs = murmur_embedding_model.predict(np.vstack(all_murmur_files_images.values))
     del all_murmur_files_images
     patient_ids = all_murmur_files_series.apply(lambda x: x.split("/")[2].split("_")[0])
@@ -1264,6 +1266,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     embs_label_val = []
     embs_test = []
     embs_label_test = []
+    logger.info("Separeting sets for murmur decision...")
     for patient_id, patient_embs in tqdm(embs_df.groupby("patient_id")):
         patient_row = patient_split_df[patient_split_df["patient_id"] == patient_id].iloc[0]
         embs_df = patient_embs["embs"].sample(frac=1, random_state=42)
@@ -1290,7 +1293,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # embs_train, labels_train = load_embs_labels(train_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
     # embs_val, labels_val = load_embs_labels(val_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
     logger.info("Loading sets for murmur decision...")
-    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).batch(RESHUFFLE_PATIENT_EMBS_N)
+    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).shuffle(buffer_size=200).batch(RESHUFFLE_PATIENT_EMBS_N)
     val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), embs_label_val)).batch(1)
     test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), embs_label_test)).batch(1)
     

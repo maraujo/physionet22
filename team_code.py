@@ -1222,7 +1222,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_model_new.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
         else:
             murmur_model_new = tf.keras.models.clone_model(noise_model_new)
-            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.SigmoidFocalCrossEntropy(), metrics=get_all_metrics())
         
         murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
                              epochs = MURMUR_EPOCHS, max_queue_size=MAX_QUEUE, class_weight=class_weight_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(

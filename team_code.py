@@ -41,8 +41,8 @@ from copy import deepcopy
 import autokeras as ak
 
 tf.keras.utils.set_random_seed(42)
-tf.config.experimental_run_functions_eagerly(True)
-tf.data.experimental.enable_debug_mode()
+tf.config.run_functions_eagerly(True)
+# tf.data.experimental.enable_debug_mode()
 
 ################################################################################
 #
@@ -1289,7 +1289,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # generate_patient_embeddings_folder_v2(patient_id, patient_row["split"], patient_row["label"], patient_embs["embs"])
     # embs_train, labels_train = load_embs_labels(train_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
     # embs_val, labels_val = load_embs_labels(val_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
-    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).shuffle(buffer_size=200).batch(RESHUFFLE_PATIENT_EMBS_N)
+    logger.info("Loading sets for murmur decision...")
+    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).batch(RESHUFFLE_PATIENT_EMBS_N)
     val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), embs_label_val)).batch(1)
     test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), embs_label_test)).batch(1)
     

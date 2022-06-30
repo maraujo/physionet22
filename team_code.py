@@ -1349,7 +1349,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # embs_train, labels_train = load_embs_labels(train_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
     # embs_val, labels_val = load_embs_labels(val_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
     logger.info("Loading sets for murmur decision...")
-    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).batch(1).shuffle(buffer_size=200, reshuffle_each_iteration=True).repeat()
+    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).batch(1).shuffle(buffer_size=len(embs_train), reshuffle_each_iteration=True).repeat()
     val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), embs_label_val)).batch(1)
     test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), embs_label_test)).batch(1)
     
@@ -1398,7 +1398,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_decision_new = Functional.from_config(murmur_decision_config) 
             murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 2e-05,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
-        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, steps_per_epoch = ALGORITHM_HPS[STEPS_PER_EPOCH_DECISION_lbl], validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, steps_per_epoch = len(embs_train), validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_compute_weighted_accuracy",
                 min_delta=0,
                 patience=20,

@@ -177,9 +177,11 @@ N_MURMUR_CNN_NEURONS_LAYERS_lbl = "N_MURMUR_CNN_NEURONS_LAYERS"
 DROPOUT_VALUE_IN_MURMUR_lbl = "DROPOUT_VALUE_IN_MURMUR"
 IS_DROPOUT_IN_MURMUR_lbl = "DROPOUT_IN_MURMUR"
 N_MURMUR_LAYERS_lbl = "N_MURMUR_LAYERS"
+STEPS_PER_EPOCH_DECISION_lbl = "STEPS_PER_EPOCH_DECISION"
 
 ALGORITHM_HPS = {
     TRAIN_FRAC_lbl : 0.8,
+    STEPS_PER_EPOCH_DECISION_lbl : None,
     EMBDS_PER_PATIENTS_lbl : 138,
     VAL_FRAC_MURMUR_lbl : 0.4,
     NOISE_IMAGE_SIZE_lbl : 64,
@@ -223,12 +225,12 @@ if os.path.exists("ohh.config"):
     if "weight_class_decisions" in OHH_ARGS:
         class_weight_decision[1] =  OHH_ARGS["weight_class_decisions"]
     
-    logger.info("Embs Size: {}" .format(ALGORITHM_HPS[EMBS_SIZE_lbl]))
-    logger.info("Weight class murmur: {}" .format(class_weight_murmur))
-    logger.info("Weight class decision: {}" .format(class_weight_decision))
-    logger.info("Murmur Image Size: {}" .format(MURMUR_IMAGE_SIZE))
-    logger.info("Random embeddings per patient: {}" .format(RESHUFFLE_PATIENT_EMBS_N))
-    logger.info("Reshuffle for training: {}" .format(RESHUFFLE_PATIENT_EMBS_N))
+logger.info("Embs Size: {}" .format(ALGORITHM_HPS[EMBS_SIZE_lbl]))
+logger.info("Weight class murmur: {}" .format(class_weight_murmur))
+logger.info("Weight class decision: {}" .format(class_weight_decision))
+logger.info("Murmur Image Size: {}" .format(MURMUR_IMAGE_SIZE))
+logger.info("Random embeddings per patient: {}" .format(RESHUFFLE_PATIENT_EMBS_N))
+logger.info("Reshuffle for training: {}" .format(RESHUFFLE_PATIENT_EMBS_N))
 
     # Embs Size : [16, 64, 256]
     # Weight class murmur : [1, 1.5, 3, 5]
@@ -1396,7 +1398,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_decision_new = Functional.from_config(murmur_decision_config) 
             murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 2e-05,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
-        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, steps_per_epoch = 200, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, steps_per_epoch = ALGORITHM_HPS[STEPS_PER_EPOCH_DECISION_lbl], validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_compute_weighted_accuracy",
                 min_delta=0,
                 patience=20,
@@ -1421,7 +1423,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         fptr.close()
         with tf.summary.create_file_writer("logs_hparams/{}".format(get_unique_name())).as_default():
             hparams = {
-                EMBS_SIZE_lbl : EMBS_SIZE,
+                EMBS_SIZE_lbl : ALGORITHM_HPS[EMBS_SIZE_lbl],
                 "class_weight_murmur" : class_weight_murmur[1],
                 "class_weight_decision" : class_weight_decision[1],
                 "MURMUR_IMAGE_SIZE" : MURMUR_IMAGE_SIZE[0],

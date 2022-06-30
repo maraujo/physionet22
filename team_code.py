@@ -1280,7 +1280,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             
         else:
             murmur_model_new = tf.keras.models.clone_model(noise_model_new)
-            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.ContrastiveLoss(), metrics=get_all_metrics())
+            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.SigmoidFocalCrossEntropy(), metrics=get_all_metrics())
         
         murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
                              epochs = MURMUR_EPOCHS, max_queue_size=MAX_QUEUE, class_weight={0: 1, 1: ALGORITHM_HPS[class_weight_murmur_lbl]}, callbacks=[tf.keras.callbacks.EarlyStopping(
@@ -1399,7 +1399,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             tuner="bayesian",
             overwrite=True,
             seed=42,
-            objective = kt.Objective("val_compute_weighted_accuracy", direction="max"),
+            objective = kt.Objective("val_auc", direction="max"),
             max_model_size=None, 
             metrics = get_all_metrics()
         )
@@ -1425,7 +1425,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 2e-05,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
         murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight={0:1, 1: ALGORITHM_HPS[class_weight_decision_lbl]}, callbacks=[tf.keras.callbacks.EarlyStopping(
-                monitor="val_compute_weighted_accuracy",
+                monitor="val_auc",
                 min_delta=0,
                 patience=20,
                 verbose=0,
@@ -1529,7 +1529,8 @@ def run_challenge_model(model, data, recordings, verbose):
             f.write(np.array(recording).astype(float))
             f.flush()
             f.close()
-        logger.info("File saved: {}".format(filename))
+        if verbose > 0:
+            logger.info("File saved: {}".format(filename))
     clean_frequency_folder(AUX_FOLDER)
     clean_files = glob.glob(os.path.join(AUX_FOLDER, "*_clean.wav"))
     for clean_file in clean_files:
@@ -1659,7 +1660,7 @@ def get_murmur_decision_model():
             model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid"))
     murmur_decision_new = tf.keras.Sequential(model_layers)
-    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate': 0.0001,'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate': 0.0001,'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.SigmoidFocalCrossEntropy(), metrics=get_all_metrics())
     return murmur_decision_new
     
      

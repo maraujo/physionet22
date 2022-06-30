@@ -191,7 +191,7 @@ ALGORITHM_HPS = {
     NOISE_IMAGE_SIZE_lbl : 64,
     RESHUFFLE_PATIENT_EMBS_N_lbl : 4,
     MURMUR_IMAGE_SIZE_lbl : NOISE_IMAGE_SIZE[1],
-    class_weight_murmur_lbl : 1,
+    class_weight_murmur_lbl : 5,
     class_weight_decision_lbl : 5,
     batch_size_murmur_lbl : 32,
     EMBS_SIZE_lbl : 2,

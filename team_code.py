@@ -189,15 +189,15 @@ ALGORITHM_HPS = {
     MURMUR_IMAGE_SIZE_lbl : NOISE_IMAGE_SIZE[1],
     class_weight_murmur_lbl : 1,
     class_weight_decision_lbl : 2,
-    batch_size_murmur_lbl : 128,
+    batch_size_murmur_lbl : 32,
     EMBS_SIZE_lbl : 64,
-    CNN_MURMUR_MODEL_lbl : False,
-    N_DECISION_LAYERS_lbl : 2,
-    NEURONS_DECISION_lbl : 16,
+    CNN_MURMUR_MODEL_lbl : True,
+    N_DECISION_LAYERS_lbl : 1,
+    NEURONS_DECISION_lbl : 32,
     IS_DROPOUT_IN_DECISION_lbl : True,
     DROPOUT_VALUE_IN_DECISION_lbl : 0.2,
     IS_MURMUR_MODEL_XCEPTION_lbl : False,
-    N_MURMUR_CNN_NEURONS_LAYERS_lbl : 2,
+    N_MURMUR_CNN_NEURONS_LAYERS_lbl : 64,
     DROPOUT_VALUE_IN_MURMUR_lbl : 0.25,
     N_MURMUR_LAYERS_lbl : 2,
     IS_DROPOUT_IN_MURMUR_lbl : True
@@ -249,7 +249,7 @@ else:
     logger.info("Running full")
     MURMUR_EPOCHS = 1000
     NOISE_EPOCHS = 100
-    MURMUR_DECISION_EPOCHS = 100
+    MURMUR_DECISION_EPOCHS = 1000
     MAX_TRIALS = 100
 
 #Download autoencoder
@@ -1232,9 +1232,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     
     # Load dataset for murmur model training  
     
-    murmur_model_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", batch_size=batch_size_murmur, seed=42, image_size=MURMUR_IMAGE_SIZE )
-    murmur_murmur_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=batch_size_murmur, seed=42, image_size=MURMUR_IMAGE_SIZE )
-    murmur_murmur_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=batch_size_murmur, seed=42, image_size=MURMUR_IMAGE_SIZE, )
+    murmur_model_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=MURMUR_IMAGE_SIZE )
+    murmur_murmur_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=MURMUR_IMAGE_SIZE )
+    murmur_murmur_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=MURMUR_IMAGE_SIZE, )
     
     if FINAL_TRAINING:
         murmur_model_dataset_train = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val)
@@ -1264,10 +1264,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     else:
         if USE_COMPLEX_MODELS:
             murmur_model_new = get_murmur_model()
-            optimizer = tf.keras.optimizers.Adam(
-                       learning_rate=0.0001
-                    )  
-            murmur_model_new.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
+            
         else:
             murmur_model_new = tf.keras.models.clone_model(noise_model_new)
             murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.ContrastiveLoss(), metrics=get_all_metrics())
@@ -1352,7 +1349,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # embs_train, labels_train = load_embs_labels(train_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
     # embs_val, labels_val = load_embs_labels(val_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
     logger.info("Loading sets for murmur decision...")
-    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).shuffle(buffer_size=200).batch(RESHUFFLE_PATIENT_EMBS_N)
+    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).batch(1).shuffle(buffer_size=200, reshuffle_each_iteration=True).repeat()
     val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), embs_label_val)).batch(1)
     test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), embs_label_test)).batch(1)
     
@@ -1394,7 +1391,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
     else:
         if USE_COMPLEX_MODELS:
             murmur_decision_new = get_murmur_decision_model() 
-            murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate': 0.0001,'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+            # murmur_decision_new = get_murmur_decision_model_pretrained(murmur_model_new) 
+            
         else:
             murmur_decision_config = get_murmur_decision_model_configs()
             murmur_decision_new = Functional.from_config(murmur_decision_config) 
@@ -1609,6 +1607,20 @@ def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decisio
         os.system("tar -cvzf {} {}".format(destinypath, model_folder))
         response = s3.upload_file(destinypath, "1hh-algorithm-dev", "models/" + os.path.basename(destinypath))
 
+
+def get_murmur_decision_model_pretrained(murmur_model):
+    input_layer = tf.keras.layers.InputLayer(input_shape=(EMBS_SIZE * EMBDS_PER_PATIENTS,))
+    layer_1 = CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True})
+    # layer_dense = tf.keras.layers.Dense(8, activation="re_lu"),
+    # layer_dropout = tf.keras.layers.Dropout(0.5, seed=42),
+    model_layers = [input_layer, layer_1]
+    dense_layer = tf.keras.layers.Dense(EMBDS_PER_PATIENTS, activation="sigmoid")
+    import ipdb;ipdb.set_trace()
+    pass
+    model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid"))
+    murmur_decision_new = tf.keras.Sequential(model_layers)
+    return murmur_decision_new
+
 def get_murmur_decision_model():
     input_layer = tf.keras.layers.InputLayer(input_shape=(EMBS_SIZE * EMBDS_PER_PATIENTS,))
     layer_1 = CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True})
@@ -1621,6 +1633,7 @@ def get_murmur_decision_model():
             model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid"))
     murmur_decision_new = tf.keras.Sequential(model_layers)
+    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate': 0.0001,'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
     return murmur_decision_new
     
      
@@ -1629,6 +1642,7 @@ def get_murmur_decision_model_configs():
     return murmur_decision_config
 
 def get_murmur_model():
+    # return ak.ImageClassifier()
     if ALGORITHM_HPS[IS_MURMUR_MODEL_XCEPTION_lbl]:
         noise_input_config = {'batch_input_shape': (None, MURMUR_IMAGE_SIZE[0], MURMUR_IMAGE_SIZE[1], 3),  'dtype': 'float32',  'name': 'input_1', 'ragged': False, 'sparse': False }
         noise_cast_to_float_config = {'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}
@@ -1671,7 +1685,10 @@ def get_murmur_model():
         murmur_model.add(tf.keras.layers.Dense(EMBS_SIZE, activation='relu'))
         murmur_model.add(tf.keras.layers.Dense(1, activation='sigmoid'))
                 
-
+    optimizer = tf.keras.optimizers.Adam(
+                       learning_rate=0.0001
+                    )  
+    murmur_model.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
     return murmur_model
 
 def get_murmur_model_configs(): 

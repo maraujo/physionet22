@@ -39,6 +39,7 @@ import tensorflow_datasets as tfds
 from sklearn.preprocessing import OneHotEncoder
 from copy import deepcopy
 import autokeras as ak
+import random
 
 tf.keras.utils.set_random_seed(42)
 tf.config.run_functions_eagerly(True)
@@ -178,6 +179,8 @@ DROPOUT_VALUE_IN_MURMUR_lbl = "DROPOUT_VALUE_IN_MURMUR"
 IS_DROPOUT_IN_MURMUR_lbl = "DROPOUT_IN_MURMUR"
 N_MURMUR_LAYERS_lbl = "N_MURMUR_LAYERS"
 STEPS_PER_EPOCH_DECISION_lbl = "STEPS_PER_EPOCH_DECISION"
+UNKOWN_RANDOM_MIN_THRESHOLD_lbl = "UNKOWN_RANDOM_MIN_THRESHOLD"
+BATCH_SIZE_DECISION_lbl = "BATCH_SIZE_DECISION"
 
 ALGORITHM_HPS = {
     TRAIN_FRAC_lbl : 0.8,
@@ -185,12 +188,12 @@ ALGORITHM_HPS = {
     EMBDS_PER_PATIENTS_lbl : 138,
     VAL_FRAC_MURMUR_lbl : 0.4,
     NOISE_IMAGE_SIZE_lbl : 64,
-    RESHUFFLE_PATIENT_EMBS_N : 10,
+    RESHUFFLE_PATIENT_EMBS_N : 4,
     MURMUR_IMAGE_SIZE_lbl : NOISE_IMAGE_SIZE[1],
     class_weight_murmur_lbl : 1,
     class_weight_decision_lbl : 5,
     batch_size_murmur_lbl : 32,
-    EMBS_SIZE_lbl : 264,
+    EMBS_SIZE_lbl : 1,
     CNN_MURMUR_MODEL_lbl : True,
     N_DECISION_LAYERS_lbl : 2,
     NEURONS_DECISION_lbl : 32,
@@ -200,7 +203,9 @@ ALGORITHM_HPS = {
     N_MURMUR_CNN_NEURONS_LAYERS_lbl : 64,
     DROPOUT_VALUE_IN_MURMUR_lbl : 0.25,
     N_MURMUR_LAYERS_lbl : 2,
-    IS_DROPOUT_IN_MURMUR_lbl : True
+    IS_DROPOUT_IN_MURMUR_lbl : True,
+    UNKOWN_RANDOM_MIN_THRESHOLD_lbl : 0.8,
+    BATCH_SIZE_DECISION_lbl : 64
 }
 
 from tensorboard.plugins.hparams import api as hp
@@ -231,6 +236,7 @@ logger.info("Weight class decision: {}" .format(class_weight_decision))
 logger.info("Murmur Image Size: {}" .format(MURMUR_IMAGE_SIZE))
 logger.info("Random embeddings per patient: {}" .format(RESHUFFLE_PATIENT_EMBS_N))
 logger.info("Reshuffle for training: {}" .format(RESHUFFLE_PATIENT_EMBS_N))
+
 
     # Embs Size : [16, 64, 256]
     # Weight class murmur : [1, 1.5, 3, 5]
@@ -1182,6 +1188,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     destiny_folder = val_positive_folder
                 if file_info["patient_id"] in test_set.values:
                     destiny_folder = test_positive_folder
+            if file_info["murmur"] == "Unknown" and random.random() > ALGORITHM_HPS[UNKOWN_RANDOM_MIN_THRESHOLD_lbl]:
+                if file_info["patient_id"] in train_set.values:
+                    destiny_folder = train_positive_folder
+                if file_info["patient_id"] in val_set.values:
+                    destiny_folder = val_positive_folder
+                if file_info["patient_id"] in test_set.values:
+                    destiny_folder = test_positive_folder
             if file_info["murmur"] == "Absent":
                 if file_info["patient_id"] in train_set.values:
                     destiny_folder = train_negative_folder
@@ -1215,8 +1228,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
     if not RUN_TEST and files_to_exclude.shape[0] > 0:
         for filepath in tqdm(files_to_exclude["filepath"]):
             os.remove(filepath)
-    
-    
     
     # Dataset for final decision
     all_files = []
@@ -1349,9 +1360,22 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # embs_train, labels_train = load_embs_labels(train_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
     # embs_val, labels_val = load_embs_labels(val_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
     logger.info("Loading sets for murmur decision...")
-    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), embs_label_train)).batch(1).shuffle(buffer_size=len(embs_train), reshuffle_each_iteration=True).repeat()
-    val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), embs_label_val)).batch(1)
-    test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), embs_label_test)).batch(1)
+    #TODO: Shuffle embs_train WITH LABELS. Than BATCH!
+    temp = list(zip(embs_train, embs_label_train))
+    random.shuffle(temp)
+    embs_train, embs_label_train = zip(*temp)
+    
+    temp = list(zip(embs_val, embs_label_val))
+    random.shuffle(temp)
+    embs_val, embs_label_val = zip(*temp)
+    
+    temp = list(zip(embs_test, embs_label_test))
+    random.shuffle(temp)
+    embs_test, embs_label_test = zip(*temp)
+    
+    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), list(embs_label_train))).batch(ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl])
+    val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), list(embs_label_val))).batch(ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl])
+    test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), list(embs_label_test))).batch(1)
     
     #TODO have simple version for this
     
@@ -1398,7 +1422,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_decision_new = Functional.from_config(murmur_decision_config) 
             murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 2e-05,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
-        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, steps_per_epoch = len(embs_train), validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_compute_weighted_accuracy",
                 min_delta=0,
                 patience=20,

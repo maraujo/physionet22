@@ -110,8 +110,7 @@ train_negative_folder = train_folder_murmur + os.path.sep + "negative"
 train_outcome_folder = "train_outcome_folder"
 test_outcome_folder = "test_outcome_folder"
 val_outcome_folder = "val_outcome_folder"
-TRAIN_FRAC = 0.8
-VAL_FRAC_MURMUR = 0.4
+
 
 val_outcome_positive_folder = val_outcome_folder + os.path.sep + "positive"
 val_outcome_negative_folder = val_outcome_folder + os.path.sep + "negative"
@@ -141,8 +140,8 @@ RESHUFFLE_PATIENT_EMBS_N = 5
 MURMUR_IMAGE_SIZE = deepcopy(NOISE_IMAGE_SIZE)
 class_weight_murmur = {0: 1, 1: 1}
 class_weight_decision = {0: 1, 1: 1.5}  
-MAX_QUEUE = 5000
-batch_size_murmur = 128
+MAX_QUEUE = 50000
+batch_size_murmur = 256
 EMBS_SIZE = 64
 RUN_AUTOKERAS_NOISE = False
 RUN_AUTOKERAS_MURMUR = False
@@ -948,7 +947,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             noise_detection_dataset_train = ak.image_dataset_from_directory(
                 NOISE_DETECTION_IMGS_PATH,
                 # Use 20% data as testing data.
-                validation_split=1 - TRAIN_FRAC,
+                validation_split=1 - ALGORITHM_HPS[TRAIN_FRAC_lbl],
                 subset="training",
                 # Set seed to ensure the same split when loading testing data.
                 seed=42,
@@ -958,7 +957,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
             noise_detection_dataset_test = ak.image_dataset_from_directory(
                 NOISE_DETECTION_IMGS_PATH,
-                validation_split=1 - TRAIN_FRAC,
+                validation_split=1 - ALGORITHM_HPS[TRAIN_FRAC_lbl],
                 subset="validation",
                 seed=42,
                 image_size=NOISE_IMAGE_SIZE,
@@ -986,11 +985,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
             
  
         else:
-            noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=1 - TRAIN_FRAC, seed=42, image_size=NOISE_IMAGE_SIZE)
+            noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=1 - ALGORITHM_HPS[TRAIN_FRAC_lbl], seed=42, image_size=NOISE_IMAGE_SIZE)
             dataset_size = len(noise_detection_dataset_train_val)
-            noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * TRAIN_FRAC))
-            noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * TRAIN_FRAC))
-            noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=1 - TRAIN_FRAC, seed=42, image_size=NOISE_IMAGE_SIZE)
+            noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * ALGORITHM_HPS[TRAIN_FRAC_lbl]))
+            noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * ALGORITHM_HPS[TRAIN_FRAC_lbl]))
+            noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=1 - ALGORITHM_HPS[TRAIN_FRAC_lbl], seed=42, image_size=NOISE_IMAGE_SIZE)
             
                
             # noise_detection_dataset_train = noise_detection_dataset_train.batch(batch_size,drop_remainder=True)        
@@ -1131,9 +1130,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     })
     
     unique_original_files = pd.Series(pd.Series(patient_ids).unique())
-    test_set = unique_original_files.sample(frac=1-TRAIN_FRAC, random_state=42)
+    test_set = unique_original_files.sample(frac=1-ALGORITHM_HPS[TRAIN_FRAC_lbl], random_state=42)
     train_val_set = unique_original_files[~unique_original_files.isin(test_set)]
-    train_set = train_val_set.sample(frac=(1 - VAL_FRAC_MURMUR), random_state=42)
+    train_set = train_val_set.sample(frac=(1 - ALGORITHM_HPS[VAL_FRAC_MURMUR_lbl]), random_state=42)
     val_set = train_val_set[~train_val_set.isin(train_set)]
     
     if GENERATE_MEL_SPECTOGRAMS_TRAIN:

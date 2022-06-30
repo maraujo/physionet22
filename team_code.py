@@ -181,12 +181,13 @@ N_MURMUR_LAYERS_lbl = "N_MURMUR_LAYERS"
 STEPS_PER_EPOCH_DECISION_lbl = "STEPS_PER_EPOCH_DECISION"
 UNKOWN_RANDOM_MIN_THRESHOLD_lbl = "UNKOWN_RANDOM_MIN_THRESHOLD"
 BATCH_SIZE_DECISION_lbl = "BATCH_SIZE_DECISION"
-
+IMG_HEIGHT_RATIO_lbl = "IMG_HEIGHT_RATIO_lbl"
 ALGORITHM_HPS = {
     TRAIN_FRAC_lbl : 0.8,
+    IMG_HEIGHT_RATIO_lbl : 1,
     STEPS_PER_EPOCH_DECISION_lbl : None,
-    EMBDS_PER_PATIENTS_lbl : 138,
-    VAL_FRAC_MURMUR_lbl : 0.4,
+    EMBDS_PER_PATIENTS_lbl : 50,
+    VAL_FRAC_MURMUR_lbl : 0.3,
     NOISE_IMAGE_SIZE_lbl : 64,
     RESHUFFLE_PATIENT_EMBS_N_lbl : 4,
     MURMUR_IMAGE_SIZE_lbl : NOISE_IMAGE_SIZE[1],
@@ -195,9 +196,9 @@ ALGORITHM_HPS = {
     batch_size_murmur_lbl : 32,
     EMBS_SIZE_lbl : 2,
     CNN_MURMUR_MODEL_lbl : True,
-    N_DECISION_LAYERS_lbl : 2,
-    NEURONS_DECISION_lbl : 32,
-    IS_DROPOUT_IN_DECISION_lbl : True,
+    N_DECISION_LAYERS_lbl : 1,
+    NEURONS_DECISION_lbl : 8,
+    IS_DROPOUT_IN_DECISION_lbl : False,
     DROPOUT_VALUE_IN_DECISION_lbl : 0.2,
     IS_MURMUR_MODEL_XCEPTION_lbl : False,
     N_MURMUR_CNN_NEURONS_LAYERS_lbl : 64,
@@ -221,7 +222,7 @@ if os.path.exists("ohh.config"):
     if "reshuffle_patient" in OHH_ARGS:
         ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl] =  OHH_ARGS["reshuffle_patient"]
     if "embs_per_patient" in OHH_ARGS:
-        EMBDS_PER_PATIENTS =  OHH_ARGS["embs_per_patient"]
+        ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl] =  OHH_ARGS["embs_per_patient"]
     if "murmur_image_size" in OHH_ARGS:
         MURMUR_IMAGE_SIZE[0] =  OHH_ARGS["murmur_image_size"]
         MURMUR_IMAGE_SIZE[1] =  OHH_ARGS["murmur_image_size"]
@@ -377,7 +378,8 @@ def clean_frequency_heartbeat(wavfile_path):
   x, sr_fake = load_wav_file_ohh(wavfile_path)
   sr = REAL_SR
   min_f = 20
-  max_f = 786 #Reference: https://bmcpediatr.biomedcentral.com/track/pdf/10.1186/1471-2431-7-23.pdf
+#   max_f = 786 #Reference: https://bmcpediatr.biomedcentral.com/track/pdf/10.1186/1471-2431-7-23.pdf
+  max_f = 530 #Reference: https://bmcpediatr.biomedcentral.com/track/pdf/10.1186/1471-2431-7-23.pdf
   y = butter_bandpass_filter(x, min_f, max_f, REAL_SR, order=3)
   y = librosa.util.normalize(y)
   sf.write(wavfile_path[:-len(".wav")] + "_clean.wav", y, REAL_SR, 'PCM_16')
@@ -476,7 +478,7 @@ def generate_mel_wav_crops_v2(filepath_output_folder):
             image_begin = (pil_image_width / duration_seconds) * start_time
             image_end = image_begin + (pil_image_width / duration_seconds) * (seconds_window) 
             # x_cut = x[start_time*sr: start_time*sr + seconds_window*sr]
-            pil_image = pil_image_full.crop((image_begin, 0, image_end, pil_image_height))
+            pil_image = pil_image_full.crop((image_begin, pil_image_height * (1-ALGORITHM_HPS[IMG_HEIGHT_RATIO_lbl]), image_end, pil_image_height))
             # pil_image = generate_mel_image(x_cut, sr, hop_length=32)
             output_filepath_prefix = output_folder.strip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
             output_filepath_wav =  output_filepath_prefix + ".wav" 
@@ -788,10 +790,10 @@ def generate_patient_embeddings_folder(row_patient, murmur_model):
     embs = np.array(embs)
     embs_df = pd.DataFrame(embs).sample(frac=1, random_state=42)
     # We lose potential embds here, fix later
-    if embs_df.shape[0] < EMBDS_PER_PATIENTS:
-        embs_df = embs_df.sample(EMBDS_PER_PATIENTS, replace=True, random_state=42)
+    if embs_df.shape[0] < ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]:
+        embs_df = embs_df.sample(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl], replace=True, random_state=42)
     else:
-        embs_df = embs_df.head(EMBDS_PER_PATIENTS)
+        embs_df = embs_df.head(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl])
     destiny_file = destiny_folder + os.path.sep + patient_id
     embs_df.to_pickle(destiny_file)
     # logger.info("Saved: " + destiny_file)
@@ -802,10 +804,10 @@ def generate_patient_embeddings_folder_v2(patient_id, split, label, patient_embs
     # patient_files = glob.glob(original_files_query)
     embs_df = patient_embs.sample(frac=1, random_state=42)
     # We lose potential embds here, fix later
-    if embs_df.shape[0] < EMBDS_PER_PATIENTS:
-        embs_df = embs_df.sample(EMBDS_PER_PATIENTS, replace=True, random_state=42)
+    if embs_df.shape[0] < ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]:
+        embs_df = embs_df.sample(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl], replace=True, random_state=42)
     else:
-        embs_df = embs_df.head(EMBDS_PER_PATIENTS)
+        embs_df = embs_df.head(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl])
     # destiny_file = destiny_folder + os.path.sep + patient_id
     # embs_df.to_pickle(destiny_file)
     # logger.info("Saved: " + destiny_file)
@@ -1341,14 +1343,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
         # We lose potential embds here, fix later
         if patient_row["split"] == "train":
             for repetition in range(ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl]):
-                embs_df = embs_df.sample(EMBDS_PER_PATIENTS, replace=True, random_state=42 + repetition)
+                embs_df = embs_df.sample(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl], replace=True, random_state=42 + repetition)
                 embs_train.append(np.vstack(embs_df).flatten())
                 embs_label_train.append(label)
         # We losing info in the validation
-        if embs_df.shape[0] < EMBDS_PER_PATIENTS:
-            embs_df = embs_df.sample(EMBDS_PER_PATIENTS, replace=True, random_state=42)
+        if embs_df.shape[0] < ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]:
+            embs_df = embs_df.sample(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl], replace=True, random_state=42)
         else:
-            embs_df = embs_df.head(EMBDS_PER_PATIENTS)
+            embs_df = embs_df.head(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl])
         if patient_row["split"] == "val":
             embs_val.append(np.vstack(embs_df).flatten())
             embs_label_val.append(label)
@@ -1451,7 +1453,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 class_weight_murmur_lbl : ALGORITHM_HPS[class_weight_murmur_lbl],
                 class_weight_decision_lbl : ALGORITHM_HPS[class_weight_decision_lbl],
                 "MURMUR_IMAGE_SIZE" : MURMUR_IMAGE_SIZE[0],
-                "EMBDS_PER_PATIENTS" : EMBDS_PER_PATIENTS,
+                EMBDS_PER_PATIENTS_lbl : ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],
                 RESHUFFLE_PATIENT_EMBS_N_lbl : ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl] 
             }
             hp.hparams(hparams)  # record the values used in this trial
@@ -1488,7 +1490,7 @@ def load_challenge_model(model_folder, verbose):
     return {"noise_model" : noise_model, 
             "murmur_model" : murmur_model, 
             "murmur_decision_model": murmur_decision_model,
-            "EMBDS_PER_PATIENTS" : models_info["EMBDS_PER_PATIENTS"],
+            EMBDS_PER_PATIENTS_lbl : ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],
             EMBS_SIZE_lbl : models_info[EMBS_SIZE_lbl],
             "NOISE_IMAGE_SIZE" : models_info["NOISE_IMAGE_SIZE"],
             "MURMUR_IMAGE_SIZE" : models_info["MURMUR_IMAGE_SIZE"],
@@ -1531,7 +1533,7 @@ def run_challenge_model(model, data, recordings, verbose):
     clean_frequency_folder(AUX_FOLDER)
     clean_files = glob.glob(os.path.join(AUX_FOLDER, "*_clean.wav"))
     for clean_file in clean_files:
-        generate_mel_wav_crops((clean_file, AUX_IMGS_FOLDER))
+        generate_mel_wav_crops_v2((clean_file, AUX_IMGS_FOLDER))
 
     imgs_to_filter = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=model["NOISE_IMAGE_SIZE"])
     imgs_noise_prediction = model["noise_model"].predict(imgs_to_filter)
@@ -1554,10 +1556,10 @@ def run_challenge_model(model, data, recordings, verbose):
     embs = murmur_embeddings_model.predict(imgs_to_emb)
     embs_df = pd.DataFrame(embs).sample(frac=1, random_state=42)
 
-    if embs_df.shape[0] < model["EMBDS_PER_PATIENTS"]:
-        embs_df = embs_df.sample(model["EMBDS_PER_PATIENTS"], replace=True, random_state=42)
+    if embs_df.shape[0] < model[EMBDS_PER_PATIENTS_lbl]:
+        embs_df = embs_df.sample(model[EMBDS_PER_PATIENTS_lbl], replace=True, random_state=42)
     else:
-        embs_df = embs_df.head(model["EMBDS_PER_PATIENTS"])
+        embs_df = embs_df.head(model[EMBDS_PER_PATIENTS_lbl])
     
     prediction = model["murmur_decision_model"].predict(embs_df.values.flatten().reshape(1,-1))
     present_prob = prediction[0][0]
@@ -1620,7 +1622,7 @@ def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decisio
     murmur_model.save(os.path.join(model_folder, "murmur_model.h5"))
     murmur_decision_model.save(os.path.join(model_folder, "murmur_decision_model.h5"))
     pd.Series({
-        "EMBDS_PER_PATIENTS" : EMBDS_PER_PATIENTS,
+        EMBDS_PER_PATIENTS_lbl : ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],
         EMBS_SIZE_lbl : ALGORITHM_HPS[EMBS_SIZE_lbl],
         "NOISE_IMAGE_SIZE" : NOISE_IMAGE_SIZE,
         "MURMUR_IMAGE_SIZE" : MURMUR_IMAGE_SIZE
@@ -1633,12 +1635,12 @@ def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decisio
 
 
 def get_murmur_decision_model_pretrained(murmur_model):
-    input_layer = tf.keras.layers.InputLayer(input_shape=(EMBS_SIZE * EMBDS_PER_PATIENTS,))
+    input_layer = tf.keras.layers.InputLayer(input_shape=(ALGORITHM_HPS[EMBS_SIZE_lbl] * ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],))
     layer_1 = CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True})
     # layer_dense = tf.keras.layers.Dense(8, activation="re_lu"),
     # layer_dropout = tf.keras.layers.Dropout(0.5, seed=42),
     model_layers = [input_layer, layer_1]
-    dense_layer = tf.keras.layers.Dense(EMBDS_PER_PATIENTS, activation="sigmoid")
+    dense_layer = tf.keras.layers.Dense(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl], activation="sigmoid")
     import ipdb;ipdb.set_trace()
     pass
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid"))
@@ -1646,7 +1648,7 @@ def get_murmur_decision_model_pretrained(murmur_model):
     return murmur_decision_new
 
 def get_murmur_decision_model():
-    input_layer = tf.keras.layers.InputLayer(input_shape=(ALGORITHM_HPS[EMBS_SIZE_lbl] * EMBDS_PER_PATIENTS,))
+    input_layer = tf.keras.layers.InputLayer(input_shape=(ALGORITHM_HPS[EMBS_SIZE_lbl] * ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],))
     layer_1 = CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True})
     # layer_dense = tf.keras.layers.Dense(8, activation="re_lu"),
     # layer_dropout = tf.keras.layers.Dropout(0.5, seed=42),
@@ -1662,7 +1664,7 @@ def get_murmur_decision_model():
     
      
 def get_murmur_decision_model_configs():
-    murmur_decision_config = {'name': 'model', 'layers': [{'class_name': 'InputLayer', 'config': {'batch_input_shape': (None, ALGORITHM_HPS[EMBS_SIZE_lbl] * EMBDS_PER_PATIENTS), 'dtype': 'float32', 'sparse': False, 'ragged': False, 'name': 'input_1'}, 'name': 'input_1', 'inbound_nodes': []}, {'class_name': 'Custom>CastToFloat32', 'config': {'name': 'cast_to_float32', 'trainable': True, 'dtype': 'float32'}, 'name': 'cast_to_float32', 'inbound_nodes': [[['input_1', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense', 'trainable': True, 'dtype': 'float32', 'units': 1024, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense', 'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]]}, {'class_name': 'ReLU', 'config': {'name': 're_lu', 'trainable': True, 'dtype': 'float32', 'max_value': None, 'negative_slope': array(0., dtype=float32), 'threshold': array(0., dtype=float32)}, 'name': 're_lu', 'inbound_nodes': [[['dense', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense_1', 'trainable': True, 'dtype': 'float32', 'units': 1, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense_1', 'inbound_nodes': [[['re_lu', 0, 0, {}]]]}, {'class_name': 'Activation', 'config': {'name': 'classification_head_1', 'trainable': True, 'dtype': 'float32', 'activation': 'sigmoid'}, 'name': 'classification_head_1', 'inbound_nodes': [[['dense_1', 0, 0, {}]]]}], 'input_layers': [['input_1', 0, 0]], 'output_layers': [['classification_head_1', 0, 0]]}
+    murmur_decision_config = {'name': 'model', 'layers': [{'class_name': 'InputLayer', 'config': {'batch_input_shape': (None, ALGORITHM_HPS[EMBS_SIZE_lbl] * ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]), 'dtype': 'float32', 'sparse': False, 'ragged': False, 'name': 'input_1'}, 'name': 'input_1', 'inbound_nodes': []}, {'class_name': 'Custom>CastToFloat32', 'config': {'name': 'cast_to_float32', 'trainable': True, 'dtype': 'float32'}, 'name': 'cast_to_float32', 'inbound_nodes': [[['input_1', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense', 'trainable': True, 'dtype': 'float32', 'units': 1024, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense', 'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]]}, {'class_name': 'ReLU', 'config': {'name': 're_lu', 'trainable': True, 'dtype': 'float32', 'max_value': None, 'negative_slope': array(0., dtype=float32), 'threshold': array(0., dtype=float32)}, 'name': 're_lu', 'inbound_nodes': [[['dense', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense_1', 'trainable': True, 'dtype': 'float32', 'units': 1, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense_1', 'inbound_nodes': [[['re_lu', 0, 0, {}]]]}, {'class_name': 'Activation', 'config': {'name': 'classification_head_1', 'trainable': True, 'dtype': 'float32', 'activation': 'sigmoid'}, 'name': 'classification_head_1', 'inbound_nodes': [[['dense_1', 0, 0, {}]]]}], 'input_layers': [['input_1', 0, 0]], 'output_layers': [['classification_head_1', 0, 0]]}
     return murmur_decision_config
 
 def get_murmur_model():

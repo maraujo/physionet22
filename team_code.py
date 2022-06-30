@@ -139,8 +139,8 @@ TRAIN_NOISE_DETECTION = True
 NOISE_IMAGE_SIZE = [108, 108]
 RESHUFFLE_PATIENT_EMBS_N = 5
 MURMUR_IMAGE_SIZE = deepcopy(NOISE_IMAGE_SIZE)
-class_weight_murmur = {0: 1, 1: 1}
-class_weight_decision = {0: 1, 1: 1.5}  
+# class_weight_murmur = {0: 1, 1: 1}
+# class_weight_decision = {0: 1, 1: 1.5}  
 MAX_QUEUE = 50000
 batch_size_murmur = 256
 RUN_AUTOKERAS_NOISE = False
@@ -188,12 +188,12 @@ ALGORITHM_HPS = {
     EMBDS_PER_PATIENTS_lbl : 138,
     VAL_FRAC_MURMUR_lbl : 0.4,
     NOISE_IMAGE_SIZE_lbl : 64,
-    RESHUFFLE_PATIENT_EMBS_N : 4,
+    RESHUFFLE_PATIENT_EMBS_N_lbl : 4,
     MURMUR_IMAGE_SIZE_lbl : NOISE_IMAGE_SIZE[1],
     class_weight_murmur_lbl : 1,
     class_weight_decision_lbl : 5,
     batch_size_murmur_lbl : 32,
-    EMBS_SIZE_lbl : 1,
+    EMBS_SIZE_lbl : 2,
     CNN_MURMUR_MODEL_lbl : True,
     N_DECISION_LAYERS_lbl : 2,
     NEURONS_DECISION_lbl : 32,
@@ -219,23 +219,23 @@ if os.path.exists("ohh.config"):
     if "embs_size" in OHH_ARGS:
         ALGORITHM_HPS[EMBS_SIZE_lbl] =  OHH_ARGS["embs_size"]
     if "reshuffle_patient" in OHH_ARGS:
-        RESHUFFLE_PATIENT_EMBS_N =  OHH_ARGS["reshuffle_patient"]
+        ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl] =  OHH_ARGS["reshuffle_patient"]
     if "embs_per_patient" in OHH_ARGS:
         EMBDS_PER_PATIENTS =  OHH_ARGS["embs_per_patient"]
     if "murmur_image_size" in OHH_ARGS:
         MURMUR_IMAGE_SIZE[0] =  OHH_ARGS["murmur_image_size"]
         MURMUR_IMAGE_SIZE[1] =  OHH_ARGS["murmur_image_size"]
     if "weight_class_murmur" in OHH_ARGS:
-        class_weight_murmur[1] =  OHH_ARGS["weight_class_murmur"]
+        ALGORITHM_HPS[class_weight_murmur_lbl] =  OHH_ARGS["weight_class_murmur"]
     if "weight_class_decisions" in OHH_ARGS:
-        class_weight_decision[1] =  OHH_ARGS["weight_class_decisions"]
+        ALGORITHM_HPS[class_weight_decision_lbl] =  OHH_ARGS["weight_class_decisions"]
     
 logger.info("Embs Size: {}" .format(ALGORITHM_HPS[EMBS_SIZE_lbl]))
-logger.info("Weight class murmur: {}" .format(class_weight_murmur))
-logger.info("Weight class decision: {}" .format(class_weight_decision))
+logger.info("Weight class murmur: {}" .format(ALGORITHM_HPS[class_weight_murmur_lbl]))
+logger.info("Weight class decision: {}" .format(ALGORITHM_HPS[class_weight_decision_lbl]))
 logger.info("Murmur Image Size: {}" .format(MURMUR_IMAGE_SIZE))
-logger.info("Random embeddings per patient: {}" .format(RESHUFFLE_PATIENT_EMBS_N))
-logger.info("Reshuffle for training: {}" .format(RESHUFFLE_PATIENT_EMBS_N))
+logger.info("Random embeddings per patient: {}" .format(ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl]))
+logger.info("Reshuffle for training: {}" .format(ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl]))
 
 
     # Embs Size : [16, 64, 256]
@@ -1261,7 +1261,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         clf = OHHAutoModel(
             inputs=input_node, tuner="bayesian", seed=42, objective=kt.Objective("val_auc", direction="max"), outputs=output_node, overwrite=True, 
             max_trials=MAX_TRIALS, metrics = get_all_metrics())
-        clf.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, epochs = MURMUR_EPOCHS, class_weight=class_weight_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
+        clf.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, epochs = MURMUR_EPOCHS, class_weight = {0 : 1, 1: ALGORITHM_HPS[class_weight_murmur_lbl]}, callbacks=[tf.keras.callbacks.EarlyStopping(
             monitor="val_auc",
             min_delta=0,
             patience=20,
@@ -1281,7 +1281,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.ContrastiveLoss(), metrics=get_all_metrics())
         
         murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
-                             epochs = MURMUR_EPOCHS, max_queue_size=MAX_QUEUE, class_weight=class_weight_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
+                             epochs = MURMUR_EPOCHS, max_queue_size=MAX_QUEUE, class_weight={0: 1, 1: ALGORITHM_HPS[class_weight_murmur_lbl]}, callbacks=[tf.keras.callbacks.EarlyStopping(
             monitor="val_auc",
             min_delta=0,
             patience=20,
@@ -1340,7 +1340,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         label = patient_row["label"] == "positive"
         # We lose potential embds here, fix later
         if patient_row["split"] == "train":
-            for repetition in range(RESHUFFLE_PATIENT_EMBS_N):
+            for repetition in range(ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl]):
                 embs_df = embs_df.sample(EMBDS_PER_PATIENTS, replace=True, random_state=42 + repetition)
                 embs_train.append(np.vstack(embs_df).flatten())
                 embs_label_train.append(label)
@@ -1401,7 +1401,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             max_model_size=None, 
             metrics = get_all_metrics()
         )
-        clf.fit(train_decision_dataset, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+        clf.fit(train_decision_dataset, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight={0:1,1:ALGORITHM_HPS[class_weight_decision_lbl]}, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_compute_weighted_accuracy",
                 min_delta=0,
                 patience=10,
@@ -1422,7 +1422,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_decision_new = Functional.from_config(murmur_decision_config) 
             murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 2e-05,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
-        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=class_weight_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight={0:1, 1: ALGORITHM_HPS[class_weight_decision_lbl]}, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_compute_weighted_accuracy",
                 min_delta=0,
                 patience=20,
@@ -1448,11 +1448,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
         with tf.summary.create_file_writer("logs_hparams/{}".format(get_unique_name())).as_default():
             hparams = {
                 EMBS_SIZE_lbl : ALGORITHM_HPS[EMBS_SIZE_lbl],
-                "class_weight_murmur" : class_weight_murmur[1],
-                "class_weight_decision" : class_weight_decision[1],
+                class_weight_murmur_lbl : ALGORITHM_HPS[class_weight_murmur_lbl],
+                class_weight_decision_lbl : ALGORITHM_HPS[class_weight_decision_lbl],
                 "MURMUR_IMAGE_SIZE" : MURMUR_IMAGE_SIZE[0],
                 "EMBDS_PER_PATIENTS" : EMBDS_PER_PATIENTS,
-                "RESHUFFLE_PATIENT_EMBS_N" : RESHUFFLE_PATIENT_EMBS_N 
+                RESHUFFLE_PATIENT_EMBS_N_lbl : ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl] 
             }
             hp.hparams(hparams)  # record the values used in this trial
             tf.summary.scalar("auc", decision_evaluation["auc"], step=1)
@@ -1707,6 +1707,7 @@ def get_murmur_model():
         if ALGORITHM_HPS[IS_DROPOUT_IN_MURMUR_lbl]:
                 murmur_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
         murmur_model.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation='relu'))
+        murmur_model.add(tf.keras.layers.BatchNormalization())
         murmur_model.add(tf.keras.layers.Dense(1, activation='sigmoid'))
                 
     optimizer = tf.keras.optimizers.Adam(

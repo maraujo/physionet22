@@ -142,7 +142,6 @@ class_weight_murmur = {0: 1, 1: 1}
 class_weight_decision = {0: 1, 1: 1.5}  
 MAX_QUEUE = 50000
 batch_size_murmur = 256
-EMBS_SIZE = 64
 RUN_AUTOKERAS_NOISE = False
 RUN_AUTOKERAS_MURMUR = False
 RUN_AUTOKERAS_DECISION = False
@@ -183,15 +182,15 @@ ALGORITHM_HPS = {
     TRAIN_FRAC_lbl : 0.8,
     EMBDS_PER_PATIENTS_lbl : 138,
     VAL_FRAC_MURMUR_lbl : 0.4,
-    NOISE_IMAGE_SIZE_lbl : 108,
-    RESHUFFLE_PATIENT_EMBS_N : 1,
+    NOISE_IMAGE_SIZE_lbl : 64,
+    RESHUFFLE_PATIENT_EMBS_N : 10,
     MURMUR_IMAGE_SIZE_lbl : NOISE_IMAGE_SIZE[1],
     class_weight_murmur_lbl : 1,
-    class_weight_decision_lbl : 2,
+    class_weight_decision_lbl : 5,
     batch_size_murmur_lbl : 32,
-    EMBS_SIZE_lbl : 64,
+    EMBS_SIZE_lbl : 264,
     CNN_MURMUR_MODEL_lbl : True,
-    N_DECISION_LAYERS_lbl : 1,
+    N_DECISION_LAYERS_lbl : 2,
     NEURONS_DECISION_lbl : 32,
     IS_DROPOUT_IN_DECISION_lbl : True,
     DROPOUT_VALUE_IN_DECISION_lbl : 0.2,
@@ -211,7 +210,7 @@ if os.path.exists("ohh.config"):
         s3 = boto3.client("s3",  aws_access_key_id=OHH_ARGS["AWS_ID"], aws_secret_access_key=OHH_ARGS["AWS_PASS"])
     RUN_TEST  = OHH_ARGS["TEST_MODE"]
     if "embs_size" in OHH_ARGS:
-        EMBS_SIZE =  OHH_ARGS["embs_size"]
+        ALGORITHM_HPS[EMBS_SIZE_lbl] =  OHH_ARGS["embs_size"]
     if "reshuffle_patient" in OHH_ARGS:
         RESHUFFLE_PATIENT_EMBS_N =  OHH_ARGS["reshuffle_patient"]
     if "embs_per_patient" in OHH_ARGS:
@@ -224,7 +223,7 @@ if os.path.exists("ohh.config"):
     if "weight_class_decisions" in OHH_ARGS:
         class_weight_decision[1] =  OHH_ARGS["weight_class_decisions"]
     
-    logger.info("Embs Size: {}" .format(EMBS_SIZE))
+    logger.info("Embs Size: {}" .format(ALGORITHM_HPS[EMBS_SIZE_lbl]))
     logger.info("Weight class murmur: {}" .format(class_weight_murmur))
     logger.info("Weight class decision: {}" .format(class_weight_decision))
     logger.info("Murmur Image Size: {}" .format(MURMUR_IMAGE_SIZE))
@@ -1019,7 +1018,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
                 noise_model_new.add(tf.keras.layers.Flatten())
                 noise_model_new.add(tf.keras.layers.Dropout(.5))
-                noise_model_new.add(tf.keras.layers.Dense(EMBS_SIZE, activation='relu'))
+                noise_model_new.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation='relu'))
                 noise_model_new.add(tf.keras.layers.Dense(1, activation='sigmoid'))
                 noise_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), 
                         loss="binary_crossentropy",
@@ -1422,7 +1421,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         fptr.close()
         with tf.summary.create_file_writer("logs_hparams/{}".format(get_unique_name())).as_default():
             hparams = {
-                "EMBS_SIZE" : EMBS_SIZE,
+                EMBS_SIZE_lbl : EMBS_SIZE,
                 "class_weight_murmur" : class_weight_murmur[1],
                 "class_weight_decision" : class_weight_decision[1],
                 "MURMUR_IMAGE_SIZE" : MURMUR_IMAGE_SIZE[0],
@@ -1464,7 +1463,7 @@ def load_challenge_model(model_folder, verbose):
             "murmur_model" : murmur_model, 
             "murmur_decision_model": murmur_decision_model,
             "EMBDS_PER_PATIENTS" : models_info["EMBDS_PER_PATIENTS"],
-            "EMBS_SIZE" : models_info["EMBS_SIZE"],
+            EMBS_SIZE_lbl : models_info[EMBS_SIZE_lbl],
             "NOISE_IMAGE_SIZE" : models_info["NOISE_IMAGE_SIZE"],
             "MURMUR_IMAGE_SIZE" : models_info["MURMUR_IMAGE_SIZE"],
             }
@@ -1596,7 +1595,7 @@ def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decisio
     murmur_decision_model.save(os.path.join(model_folder, "murmur_decision_model.h5"))
     pd.Series({
         "EMBDS_PER_PATIENTS" : EMBDS_PER_PATIENTS,
-        "EMBS_SIZE" : EMBS_SIZE,
+        EMBS_SIZE_lbl : ALGORITHM_HPS[EMBS_SIZE_lbl],
         "NOISE_IMAGE_SIZE" : NOISE_IMAGE_SIZE,
         "MURMUR_IMAGE_SIZE" : MURMUR_IMAGE_SIZE
     }).to_pickle(os.path.join(model_folder, "models_info.pickle"))
@@ -1621,7 +1620,7 @@ def get_murmur_decision_model_pretrained(murmur_model):
     return murmur_decision_new
 
 def get_murmur_decision_model():
-    input_layer = tf.keras.layers.InputLayer(input_shape=(EMBS_SIZE * EMBDS_PER_PATIENTS,))
+    input_layer = tf.keras.layers.InputLayer(input_shape=(ALGORITHM_HPS[EMBS_SIZE_lbl] * EMBDS_PER_PATIENTS,))
     layer_1 = CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True})
     # layer_dense = tf.keras.layers.Dense(8, activation="re_lu"),
     # layer_dropout = tf.keras.layers.Dropout(0.5, seed=42),
@@ -1637,7 +1636,7 @@ def get_murmur_decision_model():
     
      
 def get_murmur_decision_model_configs():
-    murmur_decision_config = {'name': 'model', 'layers': [{'class_name': 'InputLayer', 'config': {'batch_input_shape': (None, EMBS_SIZE * EMBDS_PER_PATIENTS), 'dtype': 'float32', 'sparse': False, 'ragged': False, 'name': 'input_1'}, 'name': 'input_1', 'inbound_nodes': []}, {'class_name': 'Custom>CastToFloat32', 'config': {'name': 'cast_to_float32', 'trainable': True, 'dtype': 'float32'}, 'name': 'cast_to_float32', 'inbound_nodes': [[['input_1', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense', 'trainable': True, 'dtype': 'float32', 'units': 1024, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense', 'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]]}, {'class_name': 'ReLU', 'config': {'name': 're_lu', 'trainable': True, 'dtype': 'float32', 'max_value': None, 'negative_slope': array(0., dtype=float32), 'threshold': array(0., dtype=float32)}, 'name': 're_lu', 'inbound_nodes': [[['dense', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense_1', 'trainable': True, 'dtype': 'float32', 'units': 1, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense_1', 'inbound_nodes': [[['re_lu', 0, 0, {}]]]}, {'class_name': 'Activation', 'config': {'name': 'classification_head_1', 'trainable': True, 'dtype': 'float32', 'activation': 'sigmoid'}, 'name': 'classification_head_1', 'inbound_nodes': [[['dense_1', 0, 0, {}]]]}], 'input_layers': [['input_1', 0, 0]], 'output_layers': [['classification_head_1', 0, 0]]}
+    murmur_decision_config = {'name': 'model', 'layers': [{'class_name': 'InputLayer', 'config': {'batch_input_shape': (None, ALGORITHM_HPS[EMBS_SIZE_lbl] * EMBDS_PER_PATIENTS), 'dtype': 'float32', 'sparse': False, 'ragged': False, 'name': 'input_1'}, 'name': 'input_1', 'inbound_nodes': []}, {'class_name': 'Custom>CastToFloat32', 'config': {'name': 'cast_to_float32', 'trainable': True, 'dtype': 'float32'}, 'name': 'cast_to_float32', 'inbound_nodes': [[['input_1', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense', 'trainable': True, 'dtype': 'float32', 'units': 1024, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense', 'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]]}, {'class_name': 'ReLU', 'config': {'name': 're_lu', 'trainable': True, 'dtype': 'float32', 'max_value': None, 'negative_slope': array(0., dtype=float32), 'threshold': array(0., dtype=float32)}, 'name': 're_lu', 'inbound_nodes': [[['dense', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense_1', 'trainable': True, 'dtype': 'float32', 'units': 1, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense_1', 'inbound_nodes': [[['re_lu', 0, 0, {}]]]}, {'class_name': 'Activation', 'config': {'name': 'classification_head_1', 'trainable': True, 'dtype': 'float32', 'activation': 'sigmoid'}, 'name': 'classification_head_1', 'inbound_nodes': [[['dense_1', 0, 0, {}]]]}], 'input_layers': [['input_1', 0, 0]], 'output_layers': [['classification_head_1', 0, 0]]}
     return murmur_decision_config
 
 def get_murmur_model():
@@ -1661,7 +1660,7 @@ def get_murmur_model():
                         classifier_activation='None'
                         )
         noise_layer_4 = tf.keras.layers.GlobalAveragePooling2D.from_config(noise_global_average_config)
-        noise_layer_embs = tf.keras.layers.Dense(EMBS_SIZE, activation="linear",name="dense_embs")
+        noise_layer_embs = tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation="linear",name="dense_embs")
         noise_layer_5 = tf.keras.layers.Dense.from_config(noise_dense_config)
         # noise_layer_6 = tf.keras.layers.Activation.from_config(noise_classification_head_config)
         
@@ -1681,7 +1680,7 @@ def get_murmur_model():
         murmur_model.add(tf.keras.layers.Flatten())
         if ALGORITHM_HPS[IS_DROPOUT_IN_MURMUR_lbl]:
                 murmur_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
-        murmur_model.add(tf.keras.layers.Dense(EMBS_SIZE, activation='relu'))
+        murmur_model.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation='relu'))
         murmur_model.add(tf.keras.layers.Dense(1, activation='sigmoid'))
                 
     optimizer = tf.keras.optimizers.Adam(

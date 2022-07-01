@@ -1268,13 +1268,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
     murmur_murmur_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=MURMUR_IMAGE_SIZE )
     murmur_murmur_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=MURMUR_IMAGE_SIZE, )
        
-    if FINAL_TRAINING:
-        murmur_model_dataset_train = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val)
-        murmur_murmur_dataset_val = murmur_murmur_dataset_test
-    
     sklearn_weights_murmur = class_weight.compute_class_weight("balanced",classes=[False, True], y= (np.vstack(murmur_model_dataset_train.map(lambda x,y: y)) == 1).reshape(1,-1)[0].tolist())
     sklearn_weights_murmur = dict(enumerate(sklearn_weights_murmur))
     sklearn_weights_murmur[1] *= ALGORITHM_HPS[class_weight_murmur_lbl]
+    
+    if FINAL_TRAINING:
+        murmur_model_dataset_train = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val)
+        murmur_murmur_dataset_val = murmur_murmur_dataset_test
     
     if RUN_AUTOKERAS_MURMUR:
         input_node = ak.ImageInput()
@@ -1408,17 +1408,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
     val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), list(embs_label_val))).batch(ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl])
     test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), list(embs_label_test))).batch(1)
     
-    #TODO have simple version for this
-    
+    sklearn_weights_decision = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.vstack(train_decision_dataset.map(lambda x,y: y)).tolist()[0])
+    sklearn_weights_decision = dict(enumerate(sklearn_weights_decision))
+    sklearn_weights_decision[1] *= ALGORITHM_HPS[class_weight_decision_lbl]
     
     
     if FINAL_TRAINING:
         train_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
         val_decision_dataset = test_decision_dataset
-        
-    sklearn_weights_decision = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.vstack(train_decision_dataset.map(lambda x,y: y)).tolist()[0])
-    sklearn_weights_decision = dict(enumerate(sklearn_weights_decision))
-    sklearn_weights_decision[1] *= ALGORITHM_HPS[class_weight_decision_lbl]
     
     if RUN_AUTOKERAS_DECISION:
         input = ak.Input(name=None)

@@ -146,7 +146,7 @@ batch_size_murmur = 256
 RUN_AUTOKERAS_NOISE = False
 RUN_AUTOKERAS_MURMUR = False
 RUN_AUTOKERAS_DECISION = False
-FINAL_TRAINING = False
+FINAL_TRAINING = True
 USE_COMPLEX_MODELS = True
 # EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1 if not USE_COMPLEX_MODELS else -2
 EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1
@@ -192,7 +192,7 @@ ALGORITHM_HPS = {
     RESHUFFLE_PATIENT_EMBS_N_lbl : 4,
     MURMUR_IMAGE_SIZE_lbl : NOISE_IMAGE_SIZE[1],
     class_weight_murmur_lbl : 5,
-    class_weight_decision_lbl : 5,
+    class_weight_decision_lbl : 2,
     batch_size_murmur_lbl : 32,
     EMBS_SIZE_lbl : 2,
     CNN_MURMUR_MODEL_lbl : True,

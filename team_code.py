@@ -38,8 +38,10 @@ import shutil
 import tensorflow_datasets as tfds
 from sklearn.preprocessing import OneHotEncoder
 from copy import deepcopy
+from sklearn.utils import class_weight
 import autokeras as ak
 import random
+from tensorflow import feature_column
 
 tf.keras.utils.set_random_seed(42)
 tf.config.run_functions_eagerly(True)
@@ -91,6 +93,7 @@ from typing import Union
 from autokeras.engine import head as head_module
 from autokeras import graph
 from autokeras import keras_layers
+import tensorflow_decision_forests as tfdf
 
 
 hop_length = 256
@@ -480,7 +483,7 @@ def generate_mel_wav_crops_v2(filepath_output_folder):
             # x_cut = x[start_time*sr: start_time*sr + seconds_window*sr]
             pil_image = pil_image_full.crop((image_begin, pil_image_height * (1-ALGORITHM_HPS[IMG_HEIGHT_RATIO_lbl]), image_end, pil_image_height))
             # pil_image = generate_mel_image(x_cut, sr, hop_length=32)
-            output_filepath_prefix = output_folder.strip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
+            output_filepath_prefix = output_folder.rstrip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
             output_filepath_wav =  output_filepath_prefix + ".wav" 
             output_filepath_image = output_filepath_prefix + ".png" 
             # librosa.output.write_wav(filepath, x_cut, sr, norm=True)
@@ -1151,7 +1154,17 @@ def train_challenge_model(data_folder, model_folder, verbose):
             current_recordings, locations = load_recordings_custom(data_folder, current_patient_data)
             murmur_locations = get_murmur_locations(current_patient_data)
             patient_id = get_patient_id(current_patient_data)
+            split = ""
+            if (train_set == patient_id).any():
+                split = "train"
+            elif (val_set == patient_id).any():
+                split = "val"
+            elif (test_set == patient_id).any():
+                split = "test"
+            else:
+                raise Exception("Should never happen.")
             
+                
             for recording, location in zip(current_recordings, locations):
                 recording = recording / 2 ** (16 - 1) # Normalize as: https://stackoverflow.com/questions/50062358/difference-between-load-of-librosa-and-read-of-scipy-io-wavfile
                 recording_name = str(patient_id) + "_" + get_unique_name()
@@ -1160,6 +1173,12 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     "murmur" : get_murmur(current_patient_data),
                     "outcome" : get_outcome(current_patient_data),
                     "murmur_locations" : murmur_locations,
+                    "pregnancy_status" : get_pregnancy_status(current_patient_data),
+                    "weight" : get_weight(current_patient_data),
+                    "height" : get_height(current_patient_data),
+                    "sex" : get_sex(current_patient_data),
+                    "age" :  get_age(current_patient_data),
+                    "split" : split,
                     "location" : location,
                     "patient_id" : patient_id
                 })
@@ -1248,10 +1267,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
     murmur_model_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=MURMUR_IMAGE_SIZE )
     murmur_murmur_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=MURMUR_IMAGE_SIZE )
     murmur_murmur_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=MURMUR_IMAGE_SIZE, )
-    
+       
     if FINAL_TRAINING:
         murmur_model_dataset_train = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val)
         murmur_murmur_dataset_val = murmur_murmur_dataset_test
+    
+    sklearn_weights_murmur = class_weight.compute_class_weight("balanced",classes=[False, True], y= (np.vstack(murmur_model_dataset_train.map(lambda x,y: y)) == 1).reshape(1,-1)[0].tolist())
+    sklearn_weights_murmur = dict(enumerate(sklearn_weights_murmur))
+    sklearn_weights_murmur[1] *= ALGORITHM_HPS[class_weight_murmur_lbl]
     
     if RUN_AUTOKERAS_MURMUR:
         input_node = ak.ImageInput()
@@ -1263,7 +1286,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         clf = OHHAutoModel(
             inputs=input_node, tuner="bayesian", seed=42, objective=kt.Objective("val_auc", direction="max"), outputs=output_node, overwrite=True, 
             max_trials=MAX_TRIALS, metrics = get_all_metrics())
-        clf.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, epochs = MURMUR_EPOCHS, class_weight = {0 : 1, 1: ALGORITHM_HPS[class_weight_murmur_lbl]}, callbacks=[tf.keras.callbacks.EarlyStopping(
+        clf.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, epochs = MURMUR_EPOCHS, class_weight = sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
             monitor="val_auc",
             min_delta=0,
             patience=20,
@@ -1283,7 +1306,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.SigmoidFocalCrossEntropy(), metrics=get_all_metrics())
         
         murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
-                             epochs = MURMUR_EPOCHS, max_queue_size=MAX_QUEUE, class_weight={0: 1, 1: ALGORITHM_HPS[class_weight_murmur_lbl]}, callbacks=[tf.keras.callbacks.EarlyStopping(
+                             epochs = MURMUR_EPOCHS, max_queue_size=MAX_QUEUE, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
             monitor="val_auc",
             min_delta=0,
             patience=20,
@@ -1331,10 +1354,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
     
     embs_train = []
     embs_label_train = []
+    embs_patient_id_train = []
     embs_val = []
     embs_label_val = []
+    embs_patient_id_val = []
     embs_test = []
     embs_label_test = []
+    embs_patient_id_test = []
     logger.info("Separeting sets for murmur decision...")
     for patient_id, patient_embs in tqdm(embs_df.groupby("patient_id")):
         patient_row = patient_split_df[patient_split_df["patient_id"] == patient_id].iloc[0]
@@ -1346,6 +1372,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 embs_df = embs_df.sample(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl], replace=True, random_state=42 + repetition)
                 embs_train.append(np.vstack(embs_df).flatten())
                 embs_label_train.append(label)
+                embs_patient_id_train.append(patient_id)
         # We losing info in the validation
         if embs_df.shape[0] < ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]:
             embs_df = embs_df.sample(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl], replace=True, random_state=42)
@@ -1354,9 +1381,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
         if patient_row["split"] == "val":
             embs_val.append(np.vstack(embs_df).flatten())
             embs_label_val.append(label)
+            embs_patient_id_val.append(patient_id)
         if patient_row["split"] == "test":
             embs_test.append(np.vstack(embs_df).flatten())
             embs_label_test.append(label)
+            embs_patient_id_test.append(patient_id)
         
     # generate_patient_embeddings_folder_v2(patient_id, patient_row["split"], patient_row["label"], patient_embs["embs"])
     # embs_train, labels_train = load_embs_labels(train_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
@@ -1382,9 +1411,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
     #TODO have simple version for this
     
     
+    
     if FINAL_TRAINING:
         train_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
         val_decision_dataset = test_decision_dataset
+        
+    sklearn_weights_decision = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.vstack(train_decision_dataset.map(lambda x,y: y)).tolist()[0])
+    sklearn_weights_decision = dict(enumerate(sklearn_weights_decision))
+    sklearn_weights_decision[1] *= ALGORITHM_HPS[class_weight_decision_lbl]
     
     if RUN_AUTOKERAS_DECISION:
         input = ak.Input(name=None)
@@ -1403,7 +1437,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             max_model_size=None, 
             metrics = get_all_metrics()
         )
-        clf.fit(train_decision_dataset, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight={0:1,1:ALGORITHM_HPS[class_weight_decision_lbl]}, callbacks=[tf.keras.callbacks.EarlyStopping(
+        clf.fit(train_decision_dataset, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_compute_weighted_accuracy",
                 min_delta=0,
                 patience=10,
@@ -1424,7 +1458,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_decision_new = Functional.from_config(murmur_decision_config) 
             murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 2e-05,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
-        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight={0:1, 1: ALGORITHM_HPS[class_weight_decision_lbl]}, callbacks=[tf.keras.callbacks.EarlyStopping(
+        
+        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_auc",
                 min_delta=0,
                 patience=20,
@@ -1471,8 +1506,71 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 options=None,
                 save_traces=True
             )
+    # Train outcome model
+    patients_file_informations_df["weight"] = patients_file_informations_df["weight"].fillna(patients_file_informations_df["weight"].mean())
+    patients_file_informations_df["height"] = patients_file_informations_df["height"].fillna(patients_file_informations_df["height"].mean())
+    patients_file_informations_df["age"] = patients_file_informations_df["age"].fillna(patients_file_informations_df["age"].mode()[0])
+    patients_file_informations_df["age"] = patients_file_informations_df["age"].replace("nan", patients_file_informations_df["age"].mode()[0]).values
+    patients_file_informations_df["bmi"] = patients_file_informations_df["weight"] / ((patients_file_informations_df["height"] / 100)**2)
+    patients_file_informations_df["sex"] = (patients_file_informations_df["sex"] == "Male").astype(float)
+    patients_file_informations_df["pregnancy_status"] = patients_file_informations_df["pregnancy_status"].astype(float)
+    vocab_age = feature_column.categorical_column_with_vocabulary_list('Type', patients_file_informations_df["age"].unique())
+    age_column_indicator = feature_column.indicator_column(vocab_age)
+    patients_file_informations_df = pd.concat([patients_file_informations_df, pd.get_dummies(patients_file_informations_df["age"])], axis=1)
+    demographics = ["pregnancy_status", "weight", "height", "sex", "bmi"] +  patients_file_informations_df["age"].unique().tolist()
+    patients_file_informations_values_df = patients_file_informations_df[demographics]
+    patients_file_informations_values_df = (patients_file_informations_values_df - patients_file_informations_values_df.mean()) / patients_file_informations_values_df.std()
+    patients_file_informations_df[demographics] = patients_file_informations_values_df[demographics].values
+    patients_file_informations_df["patient_id"] = patients_file_informations_df["file_prefix"].apply(lambda x: x.split("_")[0])
+    patients_file_informations_df = patients_file_informations_df.drop_duplicates(subset=["patient_id"])
+    embs_patient_id_df = pd.DataFrame(zip([*embs_train] + [*embs_val] + [*embs_test], embs_patient_id_train + embs_patient_id_val + embs_patient_id_test), columns=["embs", "patient_id"])
     
-   
+    #Prepare input dataset
+    patients_file_informations_df = patients_file_informations_df.merge(embs_patient_id_df, left_on="patient_id", right_on="patient_id")
+    inputs_features = demographics + ["embs"] 
+    input_X = pd.concat([pd.DataFrame(np.vstack(patients_file_informations_df["embs"].values)), patients_file_informations_df[[*filter(lambda x: x != "embs", inputs_features)]]], axis=1)
+    input_y = (patients_file_informations_df["outcome"] == "Abnormal").astype(float)
+    train_idx = patients_file_informations_df[patients_file_informations_df["split"] == "train"].index
+    val_idx = patients_file_informations_df[patients_file_informations_df["split"] == "val"].index
+    test_idx = patients_file_informations_df[patients_file_informations_df["split"] == "test"].index
+    train_input_X = input_X.loc[train_idx].values
+    val_input_X = input_X.loc[val_idx].values
+    test_input_X = input_X.loc[test_idx].values
+    train_input_y = input_y.loc[train_idx].values
+    val_input_y = input_y.loc[val_idx].values
+    test_input_y = input_y.loc[test_idx].values
+    
+    # tf.config.run_functions_eagerly(False)
+    # tuner = kt.tuners.RandomSearch(max_trials=20)
+    # tuner.discret("max_depth", [4, 5, 6, 7])
+    # model = tfdf.keras.GradientBoostedTreesModel(tuner=tuner)
+    # model.run_eagerly
+    # import ipdb;ipdb.set_trace()
+    # pass   
+    
+    # train_outcome_df_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1)))
+    
+    # train_outcome_df = pd.concat([pd.DataFrame(train_input_X, columns=[*map(lambda x: str(x), pd.DataFrame(train_input_X).columns)]), pd.DataFrame(train_input_y, columns= ["label"])], axis=1)
+    # train_outcome_df_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(train_outcome_df, label="label")
+    # val_outcome_df = pd.concat([pd.DataFrame(val_input_X, columns=[*map(lambda x: str(x), pd.DataFrame(val_input_X).columns)]), pd.DataFrame(val_input_y, columns= ["label"])], axis=1)
+    # val_outcome_df_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(val_outcome_df, label="label")
+    # # test_outcome_df = pd.concat([pd.DataFrame(test_input_X, columns=[*map(lambda x: str(x), pd.DataFrame(test_input_X).columns)]), pd.DataFrame(test_input_y, columns= ["label"])], axis=1)
+    # # test_outcome_df_dataset = tfdf.keras.pd_dataframe_to_tf_dataset(test_outcome_df, label="label")
+    # # model.fit(train_outcome_df_dataset)
+    # input_layer = tf.keras.layers.InputLayer(input_shape=train_input_X.shape[1])
+    # layer_1 = CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True})
+    # # layer_dense = tf.keras.layers.Dense(8, activation="re_lu"),
+    # # layer_dropout = tf.keras.layers.Dropout(0.5, seed=42),
+    # model_layers = [input_layer, layer_1]
+    # # for _ in range(ALGORITHM_HPS[N_DECISION_LAYERS_lbl]):
+    # #     model_layers.append(tf.keras.layers.Dense(ALGORITHM_HPS[NEURONS_DECISION_lbl], activation="relu"))
+    # #     if ALGORITHM_HPS[IS_DROPOUT_IN_DECISION_lbl]:
+    # #         model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
+    # model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid"))
+    # murmur_outcome_new = tf.keras.Sequential(model_layers)
+    # murmur_outcome_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate': 0.0001,'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.SigmoidFocalCrossEntropy(), metrics=get_all_metrics())
+    
+    # murmur_outcome_new.fit(train_outcome_df, validation_data=val_outcome_df)
     
     # # Save the model.
     save_challenge_model(model_folder, noise_model_new, murmur_model_new, murmur_decision_new)

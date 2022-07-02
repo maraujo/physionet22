@@ -651,7 +651,7 @@ def clean_folder(folder_path):
             except:
                 logger.info("Could not delete: {}".format(filepath))
                 
-NOISE_DETECTION_WORKING_DIR = "/dev/shm" 
+NOISE_DETECTION_WORKING_DIR = "./" 
 NOISE_DETECTION_IMGS_PATH = os.path.join(NOISE_DETECTION_WORKING_DIR, "noise_detection_sandbox")
 
 def get_all_metrics():
@@ -934,7 +934,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             logger.info(murmur_decision_model.summary())
             # save_challenge_model(model_folder, noise_model, murmur_model, murmur_decision_model)
             if verbose >= 1:
-                print('Done.')
+                print('Training completed.')
         except OSError:
             logger.error("Could not load models setting all training to True")
             TRAIN_NOISE_DETECTION = True

@@ -294,6 +294,7 @@ noise_detection_model.py
 project_noise_detection.csv
 images_aux/
 recordings_aux/
+physionet_data/
 test_folder_murmur
 train_folder_murmur
 val_folder_murmur

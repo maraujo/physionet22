@@ -1642,7 +1642,7 @@ def run_challenge_model(model, data, recordings, verbose):
         return classes, labels, probabilities
     
     # Delete noisy imgs    
-    imgs_noisy["imgs_path"].apply(lambda x: os.remove(x))
+    # imgs_noisy["imgs_path"].apply(lambda x: os.remove(x))
     
     # Get murmur embeddings
     murmur_embeddings_model = tf.keras.models.Sequential(model["murmur_model"].layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])

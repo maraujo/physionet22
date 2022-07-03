@@ -186,16 +186,16 @@ UNKOWN_RANDOM_MIN_THRESHOLD_lbl = "UNKOWN_RANDOM_MIN_THRESHOLD"
 BATCH_SIZE_DECISION_lbl = "BATCH_SIZE_DECISION"
 IMG_HEIGHT_RATIO_lbl = "IMG_HEIGHT_RATIO_lbl"
 ALGORITHM_HPS = {
-    TRAIN_FRAC_lbl : 0.8,
+    TRAIN_FRAC_lbl : 0.3,
     IMG_HEIGHT_RATIO_lbl : 1,
     STEPS_PER_EPOCH_DECISION_lbl : None,
     EMBDS_PER_PATIENTS_lbl : 50,
     VAL_FRAC_MURMUR_lbl : 0.3,
-    NOISE_IMAGE_SIZE_lbl : 64,
+    NOISE_IMAGE_SIZE_lbl : 108,
     RESHUFFLE_PATIENT_EMBS_N_lbl : 4,
     MURMUR_IMAGE_SIZE_lbl : 108,
     class_weight_murmur_lbl : 5,
-    class_weight_decision_lbl : 2,
+    class_weight_decision_lbl : 5,
     batch_size_murmur_lbl : 32,
     EMBS_SIZE_lbl : 2,
     CNN_MURMUR_MODEL_lbl : True,

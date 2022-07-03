@@ -135,7 +135,7 @@ train_embs_positive_folder = train_embs_folder_murmur + os.path.sep + "positive"
 train_embs_negative_folder = train_embs_folder_murmur + os.path.sep + "negative"
 
 
-LOAD_TRAINED_MODELS = False
+LOAD_TRAINED_MODELS = True
 GENERATE_MEL_SPECTOGRAMS_TRAIN = True
 TRAIN_NOISE_DETECTION = False
 

@@ -942,7 +942,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     # Noise model - Parameters found after runnign AutoKeras
     if TRAIN_NOISE_DETECTION:
-        batch_size = 32
+        batch_size = 4
          
         
         if RUN_AUTOKERAS_NOISE:
@@ -1031,7 +1031,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             early_stopping_noise = tf.keras.callbacks.EarlyStopping(
                 monitor="val_auc",
                 min_delta=0.0001,
-                patience=10,
+                patience=20,
                 verbose=1,
                 mode="max",
                 baseline=None,
@@ -1455,7 +1455,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         
         
         murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
-                monitor="val_auc",
+                monitor="val_compute_weighted_accuracy",
                 min_delta=0,
                 patience=20,
                 verbose=0,

@@ -137,7 +137,7 @@ train_embs_negative_folder = train_embs_folder_murmur + os.path.sep + "negative"
 
 LOAD_TRAINED_MODELS = False
 GENERATE_MEL_SPECTOGRAMS_TRAIN = True
-TRAIN_NOISE_DETECTION = True
+TRAIN_NOISE_DETECTION = False
 
 NOISE_IMAGE_SIZE = [108, 108]
 RESHUFFLE_PATIENT_EMBS_N = 5
@@ -1240,10 +1240,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
         logger.info("First 10: {}".format(pd.Series(noise_murmur_df_list).head(10)))
         noise_murmur_df = pd.concat(noise_murmur_df_list)        
         files_to_exclude = noise_murmur_df[noise_murmur_df["predictions"] > 0.5]
-        logger.info("Remove noisy files")
-        if not RUN_TEST and files_to_exclude.shape[0] > 0:
-            for filepath in tqdm(files_to_exclude["filepath"]):
-                os.remove(filepath)
+        # logger.info("Remove noisy files")
+        # if not RUN_TEST and files_to_exclude.shape[0] > 0:
+        #     for filepath in tqdm(files_to_exclude["filepath"]):
+        #         os.remove(filepath)
     else:
         logger.info("No files to remove noise.")
     

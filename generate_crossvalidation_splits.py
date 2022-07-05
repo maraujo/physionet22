@@ -46,7 +46,7 @@ if __name__ == "__main__":
     print("Number of patients : ", patient_info_df.iloc[0])
     print(patient_info_df["label"].value_counts())
 
-    cv = ShuffleSplit(n_splits=N_FOLDERS, test_size=0.2, random_state = seed)
+    cv = ShuffleSplit(n_splits=N_FOLDERS, test_size=0.3, random_state = seed)
     folder_num = 0
 
     for train, test in cv.split(patient_info_df):

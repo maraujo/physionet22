@@ -1336,7 +1336,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.SigmoidFocalCrossEntropy(), metrics=get_all_metrics())
         
         murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
-                             epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=3, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
+                             epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
             monitor="val_auc",
             min_delta=0,
             patience=20,
@@ -1487,7 +1487,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 2e-05,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
         
-        murmur_decision_new.fit(train_decision_dataset, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=3,  validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+        murmur_decision_new.fit(train_decision_dataset, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_compute_weighted_accuracy",
                 min_delta=0,
                 patience=20,

@@ -28,10 +28,11 @@ audio_destinys = zip(audio_files, destiny)
 pool = Pool(processes=(min(WORKERS, 8)))
 for _ in tqdm(pool.imap(generate_mel_wav_crops_v2, audio_destinys), total=len(audio_files)):
     pass
+pool.close()
 
 ROOT_FOLDER = "/physionet_data/challenge/files/noise_detection_sandbox/"
-HAS_NOISE_FOLDER = ROOT_FOLDER + "has_noise/"
-HAS_HEARTBEAT_FOLDER = ROOT_FOLDER + "has_heartbeat/"
+HAS_NOISE_FOLDER = ROOT_FOLDER + "positive/"
+HAS_HEARTBEAT_FOLDER = ROOT_FOLDER + "negative/"
 if not os.path.exists(HAS_NOISE_FOLDER):
     os.mkdir(HAS_NOISE_FOLDER)
 else:

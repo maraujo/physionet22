@@ -94,12 +94,13 @@ from autokeras.engine import head as head_module
 from autokeras import graph
 from autokeras import keras_layers
 import tensorflow_decision_forests as tfdf
+from tensorboard.plugins.hparams import api as hp
 
 
-hop_length = 256
+
 REAL_SR = 4000
 FIGURE_SIZE = 3
-EMBDS_PER_PATIENTS = 138
+
 train_folder_murmur = "train_folder_murmur"
 test_folder_murmur = "test_folder_murmur"
 val_folder_murmur = "val_folder_murmur"
@@ -135,31 +136,17 @@ train_embs_positive_folder = train_embs_folder_murmur + os.path.sep + "positive"
 train_embs_negative_folder = train_embs_folder_murmur + os.path.sep + "negative"
 
 
-LOAD_TRAINED_MODELS = True
-GENERATE_MEL_SPECTOGRAMS_TRAIN = True
-TRAIN_NOISE_DETECTION = False
-
-NOISE_IMAGE_SIZE = [108, 108]
-RESHUFFLE_PATIENT_EMBS_N = 5
-MURMUR_IMAGE_SIZE = deepcopy(NOISE_IMAGE_SIZE)
 # class_weight_murmur = {0: 1, 1: 1}
 # class_weight_decision = {0: 1, 1: 1.5}  
-MAX_QUEUE = 50000
-batch_size_murmur = 256
-RUN_AUTOKERAS_NOISE = False
-RUN_AUTOKERAS_MURMUR = False
-RUN_AUTOKERAS_DECISION = False
-FINAL_TRAINING = True
-USE_COMPLEX_MODELS = True
+
+
 # EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1 if not USE_COMPLEX_MODELS else -2
 EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL = -1
 
-WORKERS = min(os.cpu_count() - 1, 8)
+WORKERS = os.cpu_count() - 1
 
-N_DECISION_LAYERS = 2
 
 OHH_ARGS = None
-RUN_TEST = None
 
 TRAIN_FRAC_lbl = "TRAIN_FRAC"
 EMBDS_PER_PATIENTS_lbl = "EMBDS_PER_PATIENTS"
@@ -185,19 +172,31 @@ STEPS_PER_EPOCH_DECISION_lbl = "STEPS_PER_EPOCH_DECISION"
 UNKOWN_RANDOM_MIN_THRESHOLD_lbl = "UNKOWN_RANDOM_MIN_THRESHOLD"
 BATCH_SIZE_DECISION_lbl = "BATCH_SIZE_DECISION"
 IMG_HEIGHT_RATIO_lbl = "IMG_HEIGHT_RATIO_lbl"
+HOP_LENGTH_lbl = "HOP_LENGTH"
+LOAD_TRAINED_MODELS_lbl = "LOAD_TRAINED_MODELS"
+GENERATE_MEL_SPECTOGRAMS_TRAIN_lbl = "GENERATE_MEL_SPECTOGRAMS_TRAIN"
+TRAIN_NOISE_DETECTION_lbl = "TRAIN_NOISE_DETECTION"
+MAX_QUEUE_lbl = "MAX_QUEUE"
+RUN_AUTOKERAS_NOISE_lbl = "RUN_AUTOKERAS_NOISE"
+RUN_AUTOKERAS_MURMUR_lbl = "RUN_AUTOKERAS_MURMUR"
+RUN_AUTOKERAS_DECISION_lbl = "RUN_AUTOKERAS_DECISION"
+FINAL_TRAINING_lbl = "FINAL_TRAINING"
+USE_COMPLEX_MODELS_lbl = "USE_COMPLEX_MODELS"
+RUN_TEST_lbl = "RUN_TEST"
+
 ALGORITHM_HPS = {
+    EMBS_SIZE_lbl : 2,
+    RESHUFFLE_PATIENT_EMBS_N_lbl : 4,
+    EMBDS_PER_PATIENTS_lbl : 50,
+    class_weight_murmur_lbl : 5,
+    class_weight_decision_lbl : 5,
     TRAIN_FRAC_lbl : 0.3,
     IMG_HEIGHT_RATIO_lbl : 1,
     STEPS_PER_EPOCH_DECISION_lbl : None,
-    EMBDS_PER_PATIENTS_lbl : 50,
+    MURMUR_IMAGE_SIZE_lbl : 108,
     VAL_FRAC_MURMUR_lbl : 0.3,
     NOISE_IMAGE_SIZE_lbl : 108,
-    RESHUFFLE_PATIENT_EMBS_N_lbl : 4,
-    MURMUR_IMAGE_SIZE_lbl : 108,
-    class_weight_murmur_lbl : 5,
-    class_weight_decision_lbl : 5,
     batch_size_murmur_lbl : 32,
-    EMBS_SIZE_lbl : 2,
     CNN_MURMUR_MODEL_lbl : True,
     N_DECISION_LAYERS_lbl : 1,
     NEURONS_DECISION_lbl : 8,
@@ -209,29 +208,58 @@ ALGORITHM_HPS = {
     N_MURMUR_LAYERS_lbl : 2,
     IS_DROPOUT_IN_MURMUR_lbl : True,
     UNKOWN_RANDOM_MIN_THRESHOLD_lbl : 0.8,
-    BATCH_SIZE_DECISION_lbl : 64
+    BATCH_SIZE_DECISION_lbl : 64,
+    HOP_LENGTH_lbl : 32,
+    LOAD_TRAINED_MODELS_lbl : True,
+    GENERATE_MEL_SPECTOGRAMS_TRAIN_lbl : True,
+    TRAIN_NOISE_DETECTION_lbl : False,
+    MAX_QUEUE_lbl : 50000,
+    RUN_AUTOKERAS_NOISE_lbl : False,
+    RUN_AUTOKERAS_MURMUR_lbl : False,
+    RUN_AUTOKERAS_DECISION_lbl : False,
+    FINAL_TRAINING_lbl : True,
+    USE_COMPLEX_MODELS_lbl : True,
+    RUN_TEST_lbl : False
 }
 
-from tensorboard.plugins.hparams import api as hp
+
 
 if os.path.exists("ohh.config"):
     import boto3
     OHH_ARGS = json.loads(open("ohh.config", "r").read().strip())
     if ("AWS_ID" in OHH_ARGS) and ("AWS_PASS" in OHH_ARGS):
         s3 = boto3.client("s3",  aws_access_key_id=OHH_ARGS["AWS_ID"], aws_secret_access_key=OHH_ARGS["AWS_PASS"])
-    RUN_TEST  = OHH_ARGS["TEST_MODE"]
-    if "embs_size" in OHH_ARGS:
-        ALGORITHM_HPS[EMBS_SIZE_lbl] =  OHH_ARGS["embs_size"]
-    if "reshuffle_patient" in OHH_ARGS:
-        ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl] =  OHH_ARGS["reshuffle_patient"]
-    if "embs_per_patient" in OHH_ARGS:
-        ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl] =  OHH_ARGS["embs_per_patient"]
-    if "murmur_image_size" in OHH_ARGS:
-        ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl] =  OHH_ARGS["murmur_image_size"]
-    if "weight_class_murmur" in OHH_ARGS:
-        ALGORITHM_HPS[class_weight_murmur_lbl] =  OHH_ARGS["weight_class_murmur"]
-    if "weight_class_decisions" in OHH_ARGS:
-        ALGORITHM_HPS[class_weight_decision_lbl] =  OHH_ARGS["weight_class_decisions"]
+    ALGORITHM_HPS.update(OHH_ARGS)
+    
+    # ALGORITHM_HPS[RUN_TEST_lbl]  = OHH_ARGS["TEST_MODE"]
+    # if EMBS_SIZE_lbl in OHH_ARGS:
+    #     ALGORITHM_HPS[EMBS_SIZE_lbl] =  OHH_ARGS[EMBS_SIZE_lbl]
+    # if "reshuffle_patient" in OHH_ARGS:
+    #     ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl] =  OHH_ARGS["reshuffle_patient"]
+    # if "embs_per_patient" in OHH_ARGS:
+    #     ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl] =  OHH_ARGS["embs_per_patient"]
+    # if "murmur_image_size" in OHH_ARGS:
+    #     ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl] =  OHH_ARGS["murmur_image_size"]
+    # if "weight_class_murmur" in OHH_ARGS:
+    #     ALGORITHM_HPS[class_weight_murmur_lbl] =  OHH_ARGS["weight_class_murmur"]
+    # if "weight_class_decisions" in OHH_ARGS:
+    #     ALGORITHM_HPS[class_weight_decision_lbl] =  OHH_ARGS["weight_class_decisions"]
+    # if "TRAIN_FRAC_lbl" in OHH_ARGS:
+    #     ALGORITHM_HPS[TRAIN_FRAC_lbl] =  OHH_ARGS["TRAIN_FRAC_lbl"]
+    # if "" in OHH_ARGS:
+    #     ALGORITHM_HPS[] =  OHH_ARGS[""]
+    # if "" in OHH_ARGS:
+    #     ALGORITHM_HPS[] =  OHH_ARGS[""]
+    # if "" in OHH_ARGS:
+    #     ALGORITHM_HPS[] =  OHH_ARGS[""]
+    # if "" in OHH_ARGS:
+    #     ALGORITHM_HPS[] =  OHH_ARGS[""]
+    # if "" in OHH_ARGS:
+    #     ALGORITHM_HPS[] =  OHH_ARGS[""]
+    # if "" in OHH_ARGS:
+    #     ALGORITHM_HPS[] =  OHH_ARGS[""]
+    # if "" in OHH_ARGS:
+    #     ALGORITHM_HPS[] =  OHH_ARGS[""]
     
 logger.info("Embs Size: {}" .format(ALGORITHM_HPS[EMBS_SIZE_lbl]))
 logger.info("Weight class murmur: {}" .format(ALGORITHM_HPS[class_weight_murmur_lbl]))
@@ -248,7 +276,7 @@ logger.info("Reshuffle for training: {}" .format(ALGORITHM_HPS[RESHUFFLE_PATIENT
     # Random embeddings per patient: [15, 50, 100, 128]
     # Reshuffle for training: [1, 3, 5, 10]
 
-if RUN_TEST:
+if ALGORITHM_HPS[RUN_TEST_lbl]:
     logger.info("Running test")
     MURMUR_EPOCHS = 1
     NOISE_EPOCHS = 1
@@ -444,7 +472,7 @@ def generate_mel_wav_crops(filepath_output_folder):
             # Crop sound
             start_time = end_time - seconds_window
             x_cut = x[start_time*sr: start_time*sr + seconds_window*sr]
-            pil_image = generate_mel_image(x_cut, sr, hop_length=32)
+            pil_image = generate_mel_image(x_cut, sr, hop_length=ALGORITHM_HPS[HOP_LENGTH_lbl])
             output_filepath_prefix = output_folder.strip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
             output_filepath_wav =  output_filepath_prefix + ".wav" 
             output_filepath_image = output_filepath_prefix + ".png" 
@@ -468,7 +496,7 @@ def generate_mel_wav_crops_v2(filepath_output_folder):
         x, sr_fake = librosa.load(filepath, sr=REAL_SR)
         sr = REAL_SR
         duration_seconds = len(x)/sr
-        fig_image, ax_image = generate_mel_image_v2(x, sr, seconds_window, hop_length=32)
+        fig_image, ax_image = generate_mel_image_v2(x, sr, seconds_window, hop_length=ALGORITHM_HPS[HOP_LENGTH_lbl])
         ax_width = ax_image.get_xlim()[1]
         fig_image.canvas.draw()
         temp_canvas = fig_image.canvas
@@ -904,8 +932,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
     AUX_IMGS_POSITIVE_FOLDER = os.path.join(AUX_IMGS_FOLDER, "positive")
     AUX_IMGS_NEGATIVE_FOLDER = os.path.join(AUX_IMGS_FOLDER, "negative")
     murmur_image_folders = [train_positive_folder, train_negative_folder, val_positive_folder, val_negative_folder, test_positive_folder, test_negative_folder]
-    global GENERATE_MEL_SPECTOGRAMS_TRAIN, TRAIN_NOISE_DETECTION
-    if GENERATE_MEL_SPECTOGRAMS_TRAIN:
+    global ALGORITHM_HPS 
+    if ALGORITHM_HPS[GENERATE_MEL_SPECTOGRAMS_TRAIN_lbl]:
         clean_current_path()
     
     os.makedirs(AUX_FOLDER, exist_ok=True)
@@ -920,7 +948,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     
     os.system("tar -xf noise_detection_sandbox.tar.gz -C {}".format(NOISE_DETECTION_WORKING_DIR))
 
-    if LOAD_TRAINED_MODELS:
+    if ALGORITHM_HPS[LOAD_TRAINED_MODELS_lbl]:
         try:
             noise_model = load_pretrained_model(model_folder, "noise")
             logger.info("Loading model: {}".format("noises"))
@@ -934,18 +962,18 @@ def train_challenge_model(data_folder, model_folder, verbose):
             logger.info(murmur_decision_model.summary())
             # save_challenge_model(model_folder, noise_model, murmur_model, murmur_decision_model)
             if verbose >= 1:
-                print('Training completed.')
+                print('Load models completed.')
         except OSError:
             logger.error("Could not load models setting all training to True")
-            TRAIN_NOISE_DETECTION = True
-            GENERATE_MEL_SPECTOGRAMS_TRAIN = True
+            ALGORITHM_HPS[TRAIN_NOISE_DETECTION_lbl] = True
+            ALGORITHM_HPS[GENERATE_MEL_SPECTOGRAMS_TRAIN_lbl] = True
 
     # Noise model - Parameters found after runnign AutoKeras
-    if TRAIN_NOISE_DETECTION:
+    if ALGORITHM_HPS[TRAIN_NOISE_DETECTION_lbl]:
         batch_size = 4
          
         
-        if RUN_AUTOKERAS_NOISE:
+        if ALGORITHM_HPS[RUN_AUTOKERAS_NOISE_lbl]:
             # model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
             # filepath=os.path.join(model_folder, "noise_model_ak.model"),
             # save_weights_only=False,
@@ -985,7 +1013,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 inputs=input_node, seed=42, objective=kt.Objective("val_auc", direction="max"), outputs=output_node, overwrite=True, 
                 max_trials=MAX_TRIALS, metrics = get_all_metrics()
             )
-            clf.fit(noise_detection_dataset_train, epochs = NOISE_EPOCHS, workers= WORKERS, max_queue_size=MAX_QUEUE, use_multiprocessing=False)
+            clf.fit(noise_detection_dataset_train, epochs = NOISE_EPOCHS, workers= WORKERS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], use_multiprocessing=False)
             
             #TODO: Test
             logger.info("Noise Model Classification Report")
@@ -1010,7 +1038,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             noise_detection_dataset_val = noise_detection_dataset_val.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
             noise_detection_dataset_test = noise_detection_dataset_test.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
             
-            if USE_COMPLEX_MODELS:
+            if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
                 # noise_model_new = get_noise_model()
                 noise_model_new = get_noise_model_v2()
                 
@@ -1037,7 +1065,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 baseline=None,
                 restore_best_weights=True,
             )
-            noise_model_new.fit(noise_detection_dataset_train, batch_size = batch_size, max_queue_size=MAX_QUEUE, epochs = NOISE_EPOCHS, callbacks=[early_stopping_noise], validation_data=noise_detection_dataset_val, workers= WORKERS)
+            noise_model_new.fit(noise_detection_dataset_train, batch_size = batch_size, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], epochs = NOISE_EPOCHS, callbacks=[early_stopping_noise], validation_data=noise_detection_dataset_val, workers= WORKERS)
 
             logger.info("Noise Model Classification Report")
             logger.info(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True))
@@ -1139,7 +1167,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     train_set = train_val_set.sample(frac=(1 - ALGORITHM_HPS[VAL_FRAC_MURMUR_lbl]), random_state=42)
     val_set = train_val_set[~train_val_set.isin(train_set)]
     
-    if GENERATE_MEL_SPECTOGRAMS_TRAIN:
+    if ALGORITHM_HPS[GENERATE_MEL_SPECTOGRAMS_TRAIN_lbl]:
         for i in tqdm(range(num_patient_files)):
         #     # Load the current patient data and recordings.
             current_patient_data = load_patient_data(patient_files[i])
@@ -1269,11 +1297,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
     sklearn_weights_murmur = dict(enumerate(sklearn_weights_murmur))
     sklearn_weights_murmur[1] *= ALGORITHM_HPS[class_weight_murmur_lbl]
     
-    if FINAL_TRAINING:
+    if ALGORITHM_HPS[FINAL_TRAINING_lbl]:
         murmur_model_dataset_train = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val)
         murmur_murmur_dataset_val = murmur_murmur_dataset_test
     
-    if RUN_AUTOKERAS_MURMUR:
+    if ALGORITHM_HPS[RUN_AUTOKERAS_MURMUR_lbl]:
         input_node = ak.ImageInput()
         output_node = ak.XceptionBlock(pretrained=False)(input_node)
         output_node = ak.SpatialReduction(reduction_type="flatten")(output_node)
@@ -1295,7 +1323,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         murmur_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
   
     else:
-        if USE_COMPLEX_MODELS:
+        if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
             murmur_model_new = get_murmur_model()
             
         else:
@@ -1303,7 +1331,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.SigmoidFocalCrossEntropy(), metrics=get_all_metrics())
         
         murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
-                             epochs = MURMUR_EPOCHS, max_queue_size=MAX_QUEUE, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
+                             epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
             monitor="val_auc",
             min_delta=0,
             patience=20,
@@ -1411,11 +1439,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
     sklearn_weights_decision[1] *= ALGORITHM_HPS[class_weight_decision_lbl]
     
     
-    if FINAL_TRAINING:
+    if ALGORITHM_HPS[FINAL_TRAINING_lbl]:
         train_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
         val_decision_dataset = test_decision_dataset
     
-    if RUN_AUTOKERAS_DECISION:
+    if ALGORITHM_HPS[RUN_AUTOKERAS_DECISION_lbl]:
         input = ak.Input(name=None)
         output_node = ak.DenseBlock(num_layers=None, num_units=None, dropout=None)(input)
         output_node = ak.ClassificationHead(dropout=0)(output_node)
@@ -1444,7 +1472,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         murmur_decision_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
         
     else:
-        if USE_COMPLEX_MODELS:
+        if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
             murmur_decision_new = get_murmur_decision_model() 
             # murmur_decision_new = get_murmur_decision_model_pretrained(murmur_model_new) 
             
@@ -1454,7 +1482,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 2e-05,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
         
-        murmur_decision_new.fit(train_decision_dataset, max_queue_size=MAX_QUEUE, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+        murmur_decision_new.fit(train_decision_dataset, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_compute_weighted_accuracy",
                 min_delta=0,
                 patience=20,

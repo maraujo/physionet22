@@ -191,7 +191,7 @@ ALGORITHM_HPS = {
     EMBDS_PER_PATIENTS_lbl : 50,
     class_weight_murmur_lbl : 5,
     class_weight_decision_lbl : 5,
-    TRAIN_FRAC_lbl : 0.3,
+    TRAIN_FRAC_lbl : 0.8,
     IMG_HEIGHT_RATIO_lbl : 1,
     STEPS_PER_EPOCH_DECISION_lbl : None,
     MURMUR_IMAGE_SIZE_lbl : 108,

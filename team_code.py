@@ -30,6 +30,7 @@ from sklearn.metrics import average_precision_score
 from loguru import logger
 from numpy import *
 import glob
+import pprint
 from autokeras.keras_layers import CastToFloat32
 from sklearn.preprocessing import OneHotEncoder
 from uuid import uuid4
@@ -210,9 +211,9 @@ ALGORITHM_HPS = {
     UNKOWN_RANDOM_MIN_THRESHOLD_lbl : 0.8,
     BATCH_SIZE_DECISION_lbl : 64,
     HOP_LENGTH_lbl : 32,
-    LOAD_TRAINED_MODELS_lbl : True,
+    LOAD_TRAINED_MODELS_lbl : False,
     GENERATE_MEL_SPECTOGRAMS_TRAIN_lbl : True,
-    TRAIN_NOISE_DETECTION_lbl : False,
+    TRAIN_NOISE_DETECTION_lbl : True,
     MAX_QUEUE_lbl : 50000,
     RUN_AUTOKERAS_NOISE_lbl : False,
     RUN_AUTOKERAS_MURMUR_lbl : False,
@@ -261,12 +262,14 @@ if os.path.exists("ohh.config"):
     # if "" in OHH_ARGS:
     #     ALGORITHM_HPS[] =  OHH_ARGS[""]
     
-logger.info("Embs Size: {}" .format(ALGORITHM_HPS[EMBS_SIZE_lbl]))
-logger.info("Weight class murmur: {}" .format(ALGORITHM_HPS[class_weight_murmur_lbl]))
-logger.info("Weight class decision: {}" .format(ALGORITHM_HPS[class_weight_decision_lbl]))
-logger.info("Murmur Image Size: {}" .format(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]))
-logger.info("Random embeddings per patient: {}" .format(ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl]))
-logger.info("Reshuffle for training: {}" .format(ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl]))
+# logger.info("Embs Size: {}" .format(ALGORITHM_HPS[EMBS_SIZE_lbl]))
+# logger.info("Weight class murmur: {}" .format(ALGORITHM_HPS[class_weight_murmur_lbl]))
+# logger.info("Weight class decision: {}" .format(ALGORITHM_HPS[class_weight_decision_lbl]))
+# logger.info("Murmur Image Size: {}" .format(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]))
+# logger.info("Random embeddings per patient: {}" .format(ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl]))
+# logger.info("Reshuffle for training: {}" .format(ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl]))
+
+logger.info("Parameters:\n{}".format(pprint.pformat(ALGORITHM_HPS)))
 
 
     # Embs Size : [16, 64, 256]

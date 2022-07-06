@@ -184,6 +184,7 @@ RUN_AUTOKERAS_DECISION_lbl = "RUN_AUTOKERAS_DECISION"
 FINAL_TRAINING_lbl = "FINAL_TRAINING"
 USE_COMPLEX_MODELS_lbl = "USE_COMPLEX_MODELS"
 RUN_TEST_lbl = "RUN_TEST"
+FINAL_DECISION_THRESHOLD_lbl = "FINAL_DECISION_THRESHOLD"
 
 ALGORITHM_HPS = {
     EMBS_SIZE_lbl : 2,
@@ -194,6 +195,7 @@ ALGORITHM_HPS = {
     TRAIN_FRAC_lbl : 0.8,
     IMG_HEIGHT_RATIO_lbl : 1,
     STEPS_PER_EPOCH_DECISION_lbl : None,
+    FINAL_DECISION_THRESHOLD_lbl : 0.5,
     MURMUR_IMAGE_SIZE_lbl : 108,
     VAL_FRAC_MURMUR_lbl : 0.3,
     NOISE_IMAGE_SIZE_lbl : 108,
@@ -1001,7 +1003,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 validation_split=1 - ALGORITHM_HPS[TRAIN_FRAC_lbl],
                 subset="validation",
                 seed=42,
-                image_size=ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl],
+                image_size=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl]),
                 batch_size=batch_size,
             )
             
@@ -1020,7 +1022,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             
             #TODO: Test
             logger.info("Noise Model Classification Report")
-            logger.info(clf.evaluate(noise_detection_dataset_test, return_dict=True))
+            logger.info(pprint.pformat(clf.evaluate(noise_detection_dataset_test, return_dict=True)))
             
             noise_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
             
@@ -1071,7 +1073,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             noise_model_new.fit(noise_detection_dataset_train, batch_size = batch_size, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], epochs = NOISE_EPOCHS, callbacks=[early_stopping_noise], validation_data=noise_detection_dataset_val, workers= WORKERS)
 
             logger.info("Noise Model Classification Report")
-            logger.info(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True))
+            logger.info(pprint.pformat(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True)))
     else:
         noise_model_new = noise_model
         
@@ -1257,24 +1259,25 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
     # Clean imgs with noise prediction
     
-    noise_murmur_df_list = []
+    noise_murmur_df_list = pd.DataFrame()
     for folder in murmur_image_folders:
         try:
-            noise_detection_dataset = tf.keras.utils.image_dataset_from_directory(folder, label_mode = None, image_size=ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], shuffle=False)
+            noise_detection_dataset = tf.keras.utils.image_dataset_from_directory(folder, label_mode = None, image_size=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl]), shuffle=False)
         except ValueError:
             continue
         predictions = noise_model_new.predict(noise_detection_dataset)
-        noise_murmur_df_list.append(pd.DataFrame({"predictions" : predictions.flatten(), "filepath" : noise_detection_dataset.file_paths}))
+        noise_murmur_df_list = noise_murmur_df_list.append(pd.DataFrame({"predictions" : predictions.flatten(), "filepath" : noise_detection_dataset.file_paths}))
     
-    if len(noise_murmur_df_list) > 0:
-        logger.info("Files to remove noise: {}".format(len(noise_murmur_df_list)))
-        logger.info("First 10: {}".format(pd.Series(noise_murmur_df_list).head(10)))
-        noise_murmur_df = pd.concat(noise_murmur_df_list)        
-        files_to_exclude = noise_murmur_df[noise_murmur_df["predictions"] > 0.5]
-        # logger.info("Remove noisy files")
-        # if not RUN_TEST and files_to_exclude.shape[0] > 0:
-        #     for filepath in tqdm(files_to_exclude["filepath"]):
-        #         os.remove(filepath)
+
+    if noise_murmur_df_list.shape[0] > 0:
+        logger.info("Files to evaluated by noise: {}".format(noise_murmur_df_list.shape[0]))
+        logger.info("First 10: {}".format(noise_murmur_df_list.head(10)))      
+        files_to_exclude = noise_murmur_df_list[noise_murmur_df_list["predictions"] > 0.5]
+        logger.info("Remove noisy files:")
+        if not ALGORITHM_HPS[RUN_TEST_lbl] and files_to_exclude.shape[0] > 0:
+            for filepath in tqdm(files_to_exclude["filepath"]):
+                logger.info("Noisy file: {}".format(filepath))
+                os.remove(filepath)
     else:
         logger.info("No files to remove noise.")
     
@@ -1347,7 +1350,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         )], workers= WORKERS)
     # murmur_model_new.set_weights(noise_model_new.get_weights())
     logger.info("Murmur Model Performance")
-    logger.info(murmur_model_new.evaluate(murmur_murmur_dataset_test, return_dict=True))
+    logger.info(pprint.pformat(murmur_model_new.evaluate(murmur_murmur_dataset_test, return_dict=True)))
     tf.keras.models.save_model(
             murmur_model_new,
             os.path.join(model_folder, 'murmur_model.tf'),
@@ -1466,7 +1469,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             metrics = get_all_metrics()
         )
         clf.fit(train_decision_dataset, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
-                monitor="val_compute_weighted_accuracy",
+                monitor="val_auc",
                 min_delta=0,
                 patience=10,
                 verbose=0,
@@ -1488,7 +1491,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         
         
         murmur_decision_new.fit(train_decision_dataset, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
-                monitor="val_compute_weighted_accuracy",
+                monitor="val_auc",
                 min_delta=0,
                 patience=20,
                 verbose=0,
@@ -1499,7 +1502,23 @@ def train_challenge_model(data_folder, model_folder, verbose):
         
         logger.info("Murmur Detection Model Classification Report")
         decision_evaluation = murmur_decision_new.evaluate(test_decision_dataset, return_dict=True) 
-        logger.info(decision_evaluation)
+        logger.info("Find best threshold...")
+        
+        test_predictions_proba = murmur_decision_new.predict(test_decision_dataset)
+        cwa_thresholds = []
+        for threshold in np.arange(0,1,0.01):
+            test_predictions = (test_predictions_proba > threshold)
+            test_predictions = enc.transform(test_predictions).toarray()
+            test_labels = np.vstack(test_decision_dataset.map(lambda x, y: y))
+            test_labels = enc.transform(test_labels).toarray()
+            cwa = cwa_fn(test_labels, test_predictions, classes = ["Abnormal", "Normal"])
+            cwa_thresholds.append({
+                "cwa" : cwa,
+                "thresholds" : threshold
+            })
+        
+        ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = pd.DataFrame(cwa_thresholds).set_index("thresholds")["cwa"].idxmax()
+        logger.info(pprint.pformat(decision_evaluation))
         # Embs Size : [16, 64, 256]
         # Weight class murmur : [1, 1.5, 3, 5]
         # Weight class decision : [1, 1.5, 3, 5]
@@ -1620,7 +1639,51 @@ def load_challenge_model(model_folder, verbose):
             EMBS_SIZE_lbl : models_info[EMBS_SIZE_lbl],
             NOISE_IMAGE_SIZE_lbl : models_info[NOISE_IMAGE_SIZE_lbl],
             MURMUR_IMAGE_SIZE_lbl : models_info[MURMUR_IMAGE_SIZE_lbl],
+            FINAL_DECISION_THRESHOLD_lbl : models_info[FINAL_DECISION_THRESHOLD_lbl]
             }
+
+def ccm(labels, outputs):
+    assert(np.shape(labels)[0] == np.shape(outputs)[0])
+    assert(all(value in (0, 1, True, False) for value in np.unique(labels)))
+    assert(all(value in (0, 1, True, False) for value in np.unique(outputs)))
+
+    num_patients = np.shape(labels)[0]
+    num_label_classes = np.shape(labels)[1]
+    num_output_classes = np.shape(outputs)[1]
+
+    A = np.zeros((num_output_classes, num_label_classes))
+    for k in range(num_patients):
+        for i in range(num_output_classes):
+            for j in range(num_label_classes):
+                if outputs[k, i] == 1 and labels[k, j] == 1:
+                    A[i, j] += 1
+
+    return A
+
+def cwa_fn(labels, outputs, classes):
+    # Define constants.
+    if classes == ['Present', 'Unknown', 'Absent']:
+        weights = np.array([[5, 3, 1], [5, 3, 1], [5, 3, 1]])
+    elif classes == ['Abnormal', 'Normal']:
+        weights = np.array([[5, 1], [5, 1]])
+    else:
+        raise NotImplementedError('Weighted accuracy undefined for classes {}'.format(', '.join(classes)))
+
+    # Compute confusion matrix.
+    assert(np.shape(labels) == np.shape(outputs))
+    A = ccm(labels, outputs)
+
+    # Multiply the confusion matrix by the weight matrix.
+    assert(np.shape(A) == np.shape(weights))
+    B = weights * A
+
+    # Compute weighted_accuracy.
+    if np.sum(B) > 0:
+        weighted_accuracy = np.trace(B) / np.sum(B)
+    else:
+        weighted_accuracy = float('nan')
+
+    return weighted_accuracy
 
 def get_unique_name():
     return str(uuid4())
@@ -1662,7 +1725,7 @@ def run_challenge_model(model, data, recordings, verbose):
     for clean_file in clean_files:
         generate_mel_wav_crops_v2((clean_file, AUX_IMGS_FOLDER))
 
-    imgs_to_filter = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=(model[NOISE_IMAGE_SIZE_lbl], model[NOISE_IMAGE_SIZE_lbl]))
+    imgs_to_filter = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=(int(model[NOISE_IMAGE_SIZE_lbl]), int(model[NOISE_IMAGE_SIZE_lbl])))
     imgs_noise_prediction = model["noise_model"].predict(imgs_to_filter)
     imgs_noise_df = pd.DataFrame({"imgs_path":imgs_to_filter.file_paths, "noise_prob" : imgs_noise_prediction.flatten()})
     imgs_clean = imgs_noise_df[imgs_noise_df["noise_prob"] < 0.5]
@@ -1679,7 +1742,7 @@ def run_challenge_model(model, data, recordings, verbose):
     
     # Get murmur embeddings
     murmur_embeddings_model = tf.keras.models.Sequential(model["murmur_model"].layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
-    imgs_to_emb = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=(model[MURMUR_IMAGE_SIZE_lbl], model[MURMUR_IMAGE_SIZE_lbl]))
+    imgs_to_emb = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=(int(model[MURMUR_IMAGE_SIZE_lbl]), int(model[MURMUR_IMAGE_SIZE_lbl])))
     embs = murmur_embeddings_model.predict(imgs_to_emb)
     embs_df = pd.DataFrame(embs).sample(frac=1, random_state=42)
 
@@ -1696,8 +1759,8 @@ def run_challenge_model(model, data, recordings, verbose):
     outcome_probabilities = np.array([present_prob, absent_prob])
     probabilities = np.concatenate([murmur_probabilities, outcome_probabilities])
     
-    murmur_labels = murmur_probabilities > 0.5
-    outcome_labels = outcome_probabilities > 0.5
+    murmur_labels = murmur_probabilities > model[FINAL_DECISION_THRESHOLD_lbl]
+    outcome_labels = outcome_probabilities > model[FINAL_DECISION_THRESHOLD_lbl]
     labels = np.concatenate([murmur_labels, outcome_labels])
     classes = murmur_classes + outcome_classes
     # import ipdb;ipdb.set_trace()
@@ -1752,7 +1815,8 @@ def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decisio
         EMBDS_PER_PATIENTS_lbl : ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],
         EMBS_SIZE_lbl : ALGORITHM_HPS[EMBS_SIZE_lbl],
         NOISE_IMAGE_SIZE_lbl : ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl],
-        MURMUR_IMAGE_SIZE_lbl : ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]
+        MURMUR_IMAGE_SIZE_lbl : ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl],
+        FINAL_DECISION_THRESHOLD_lbl : ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl]
     }).to_pickle(os.path.join(model_folder, "models_info.pickle"))
     
     if OHH_ARGS and ("AWS_ID" in OHH_ARGS):

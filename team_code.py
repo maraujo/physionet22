@@ -290,7 +290,7 @@ if ALGORITHM_HPS[RUN_TEST_lbl]:
 else:
     logger.info("Running full")
     MURMUR_EPOCHS = 1000
-    NOISE_EPOCHS = 100
+    NOISE_EPOCHS = 1000
     MURMUR_DECISION_EPOCHS = 1000
     MAX_TRIALS = 100
 
@@ -1511,6 +1511,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
             test_predictions = enc.transform(test_predictions).toarray()
             test_labels = np.vstack(test_decision_dataset.map(lambda x, y: y))
             test_labels = enc.transform(test_labels).toarray()
+            # tn, fp, fn, tp =  sklearn.metrics.confusion_matrix(test_predictions, test_labels).ravel()
+            # ohh_metric = (tp / (tp + fn)) / (tn / (tn + fp))
             cwa = cwa_fn(test_labels, test_predictions, classes = ["Abnormal", "Normal"])
             cwa_thresholds.append({
                 "cwa" : cwa,
@@ -1518,6 +1520,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             })
         
         ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = pd.DataFrame(cwa_thresholds).set_index("thresholds")["cwa"].idxmax()
+        logger.info("Final threshold: {}".format(ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl]))
         logger.info(pprint.pformat(decision_evaluation))
         # Embs Size : [16, 64, 256]
         # Weight class murmur : [1, 1.5, 3, 5]

@@ -291,7 +291,7 @@ else:
     logger.info("Running full")
     MURMUR_EPOCHS = 1000
     NOISE_EPOCHS = 1000
-    MURMUR_DECISION_EPOCHS = 1000
+    MURMUR_DECISION_EPOCHS = 100
     MAX_TRIALS = 100
 
 #Download autoencoder

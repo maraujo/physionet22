@@ -15,6 +15,7 @@ from soundfile import SoundFile
 from helper_code import *
 import numpy as np, scipy as sp, scipy.stats, os, sys, joblib
 from sklearn.impute import SimpleImputer
+from sklearn.metrics import confusion_matrix
 from sklearn.ensemble import RandomForestClassifier
 from keras.models import load_model
 from urllib.request import urlopen, Request
@@ -1511,8 +1512,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
             test_predictions = enc.transform(test_predictions).toarray()
             test_labels = np.vstack(test_decision_dataset.map(lambda x, y: y))
             test_labels = enc.transform(test_labels).toarray()
-            # tn, fp, fn, tp =  sklearn.metrics.confusion_matrix(test_predictions, test_labels).ravel()
-            # ohh_metric = (tp / (tp + fn)) / (tn / (tn + fp))
+            tn, fp, fn, tp =  confusion_matrix(enc.inverse_transform(test_labels).flatten(), enc.inverse_transform(test_predictions).flatten(), labels=[False, True]).flatten()
+            ohh_metric = (tp / (tp + fn)) / (tn / (tn + fp))
+            if ohh_metric > 1.5 or ohh_metric < 0.5:
+                continue
             cwa = cwa_fn(test_labels, test_predictions, classes = ["Abnormal", "Normal"])
             cwa_thresholds.append({
                 "cwa" : cwa,

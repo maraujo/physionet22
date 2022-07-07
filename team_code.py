@@ -1872,6 +1872,8 @@ def get_murmur_decision_model():
     # layer_dense = tf.keras.layers.Dense(8, activation="re_lu"),
     # layer_dropout = tf.keras.layers.Dropout(0.5, seed=42),
     model_layers = [input_layer, layer_1]
+    if ALGORITHM_HPS[IS_DROPOUT_IN_DECISION_lbl]:
+        model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
     for _ in range(ALGORITHM_HPS[N_DECISION_LAYERS_lbl]):
         model_layers.append(tf.keras.layers.Dense(ALGORITHM_HPS[NEURONS_DECISION_lbl], activation="relu"))
         if ALGORITHM_HPS[IS_DROPOUT_IN_DECISION_lbl]:

@@ -1655,6 +1655,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     
     # # Save the model.
     save_challenge_model(model_folder, noise_model_new, murmur_model_new, murmur_decision_new)
+    tf.keras.backend.clear_session()
     # clean_current_path()
     if verbose >= 1:
         print('Done.')

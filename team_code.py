@@ -1047,6 +1047,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
             noise_detection_dataset_val = noise_detection_dataset_val.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
             noise_detection_dataset_test = noise_detection_dataset_test.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
             
+            if ALGORITHM_HPS[FINAL_TRAINING_lbl]:
+                noise_detection_dataset_train = noise_detection_dataset_train.concatenate(noise_detection_dataset_val)
+                noise_detection_dataset_val = noise_detection_dataset_test
+            
             if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
                 # noise_model_new = get_noise_model()
                 noise_model_new = get_noise_model_v2()

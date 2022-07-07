@@ -186,9 +186,11 @@ FINAL_TRAINING_lbl = "FINAL_TRAINING"
 USE_COMPLEX_MODELS_lbl = "USE_COMPLEX_MODELS"
 RUN_TEST_lbl = "RUN_TEST"
 FINAL_DECISION_THRESHOLD_lbl = "FINAL_DECISION_THRESHOLD"
+MIN_SENS_AND_SPEC_lbl = "MIN_SENS_AND_SPEC"
 
 ALGORITHM_HPS = {
     EMBS_SIZE_lbl : 2,
+    MIN_SENS_AND_SPEC_lbl : 0.60,
     RESHUFFLE_PATIENT_EMBS_N_lbl : 4,
     EMBDS_PER_PATIENTS_lbl : 50,
     class_weight_murmur_lbl : 5,
@@ -292,7 +294,7 @@ else:
     logger.info("Running full")
     MURMUR_EPOCHS = 1000
     NOISE_EPOCHS = 1000
-    MURMUR_DECISION_EPOCHS = 100
+    MURMUR_DECISION_EPOCHS = 150
     MAX_TRIALS = 100
 
 #Download autoencoder
@@ -1505,24 +1507,44 @@ def train_challenge_model(data_folder, model_folder, verbose):
         decision_evaluation = murmur_decision_new.evaluate(test_decision_dataset, return_dict=True) 
         logger.info("Find best threshold...")
         
-        test_predictions_proba = murmur_decision_new.predict(test_decision_dataset)
+        #Fuse train and test to choose decision thresholds? Doing this in faith since val has low number of samples.
+        test_predictions_proba = murmur_decision_new.predict(np.vstack(embs_train + embs_val + embs_test))
+        test_labels_original = np.array([*embs_label_train] + [*embs_label_val] + [*embs_label_test]).reshape(-1,1)
+        
+        # test_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
+        
+        # test_predictions_proba = murmur_decision_new.predict(test_decision_dataset)
         cwa_thresholds = []
         for threshold in np.arange(0,1,0.01):
+            test_labels = test_labels_original.copy()
             test_predictions = (test_predictions_proba > threshold)
             test_predictions = enc.transform(test_predictions).toarray()
-            test_labels = np.vstack(test_decision_dataset.map(lambda x, y: y))
+            # test_labels = np.vstack(test_decision_dataset.map(lambda x, y: y))
             test_labels = enc.transform(test_labels).toarray()
             tn, fp, fn, tp =  confusion_matrix(enc.inverse_transform(test_labels).flatten(), enc.inverse_transform(test_predictions).flatten(), labels=[False, True]).flatten()
-            ohh_metric = (tp / (tp + fn)) / (tn / (tn + fp))
-            if ohh_metric > 1.5 or ohh_metric < 0.5:
+            all_positive = tp+fn
+            all_negative = tn+fp
+            if all_positive == 0 or all_negative == 0:
                 continue
+            ohh_metric = (tp / all_positive) / (tn / all_negative)
+            if  (tp / (tp + fn)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl] or (tn / (tn + fp)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl]:
+                continue
+            
             cwa = cwa_fn(test_labels, test_predictions, classes = ["Abnormal", "Normal"])
             cwa_thresholds.append({
                 "cwa" : cwa,
-                "thresholds" : threshold
+                "thresholds" : threshold,
+                "ohh_metric" : ohh_metric,
+                "senstivity" : tp / (tp + fn),
+                "specificity" : tn / (tn + fp)
             })
-        
-        ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = pd.DataFrame(cwa_thresholds).set_index("thresholds")["cwa"].idxmax()
+        thresholds_df = pd.DataFrame(cwa_thresholds)
+        if thresholds_df.shape[0] > 0:
+            thresholds_df.set_index("thresholds").plot()
+            plt.savefig("thresholds.png")
+            ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df.set_index("thresholds")["cwa"].idxmax()
+        else:
+            logger.error("THRESHOLD NOT CHANGED!")
         logger.info("Final threshold: {}".format(ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl]))
         logger.info(pprint.pformat(decision_evaluation))
         # Embs Size : [16, 64, 256]

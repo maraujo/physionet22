@@ -28,3 +28,4 @@ awscli==1.25.18
 psutil==5.9.1
 tensorflow-decision-forests==0.2.4
 ipdb==0.13.9
+climage==0.1.3

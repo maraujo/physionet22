@@ -11,6 +11,7 @@
 
 from gc import callbacks
 from pyclbr import Function
+from tabulate import tabulate
 from soundfile import SoundFile
 from helper_code import *
 import numpy as np, scipy as sp, scipy.stats, os, sys, joblib
@@ -1543,6 +1544,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             thresholds_df.set_index("thresholds").plot()
             plt.savefig("thresholds.png")
             ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df.set_index("thresholds")["sensitivity"].idxmax()
+            logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
         else:
             logger.error("THRESHOLD NOT CHANGED!")
         logger.info("Final threshold: {}".format(ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl]))

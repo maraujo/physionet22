@@ -12,6 +12,7 @@
 from gc import callbacks
 from pyclbr import Function
 from tabulate import tabulate
+from kneed import KneeLocator
 from soundfile import SoundFile
 from helper_code import *
 import numpy as np, scipy as sp, scipy.stats, os, sys, joblib
@@ -192,7 +193,7 @@ MIN_SENS_AND_SPEC_lbl = "MIN_SENS_AND_SPEC"
 
 ALGORITHM_HPS = {
     EMBS_SIZE_lbl : 2,
-    MIN_SENS_AND_SPEC_lbl : 0.60,
+    MIN_SENS_AND_SPEC_lbl : 0.68,
     RESHUFFLE_PATIENT_EMBS_N_lbl : 4,
     EMBDS_PER_PATIENTS_lbl : 50,
     class_weight_murmur_lbl : 5,
@@ -1544,11 +1545,17 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 "sensitivity" : tp / (tp + fn),
                 "specificity" : tn / (tn + fp)
             })
-        thresholds_df = pd.DataFrame(cwa_thresholds)
+        thresholds_df = pd.DataFrame(cwa_thresholds).set_index("thresholds")
         if thresholds_df.shape[0] > 0:
             thresholds_df.set_index("thresholds").plot()
             plt.savefig("thresholds.png")
-            ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df.set_index("thresholds")["sensitivity"].idxmax()
+            if thresholds_df.shape[0] > 5:
+                y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
+                x = thresholds_df.index.values
+                kn = KneeLocator(x, y, curve='convex', direction='decreasing')
+                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee
+            else:
+                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
             logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
         else:
             logger.error("THRESHOLD NOT CHANGED!")

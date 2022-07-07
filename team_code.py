@@ -1545,10 +1545,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 "sensitivity" : tp / (tp + fn),
                 "specificity" : tn / (tn + fp)
             })
-
+        thresholds_df = pd.DataFrame(cwa_thresholds)
         if thresholds_df.shape[0] > 0:
-            thresholds_df = pd.DataFrame(cwa_thresholds).set_index("thresholds")
-            thresholds_df.set_index("thresholds").plot()
+            thresholds_df = thresholds_df.set_index("thresholds")
+            thresholds_df.plot()
             plt.savefig("thresholds.png")
             if thresholds_df.shape[0] > 5:
                 y = thresholds_df["sensitivity"] / thresholds_df["specificity"]

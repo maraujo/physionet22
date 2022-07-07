@@ -1525,7 +1525,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             tn, fp, fn, tp =  confusion_matrix(enc.inverse_transform(test_labels).flatten(), enc.inverse_transform(test_predictions).flatten(), labels=[False, True]).flatten()
             all_positive = tp+fn
             all_negative = tn+fp
-            if all_positive == 0 or all_negative == 0:
+            if all_positive == 0 or all_negative == 0 or tn == 0:
                 continue
             ohh_metric = (tp / all_positive) / (tn / all_negative)
             if  (tp / (tp + fn)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl] or (tn / (tn + fp)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl]:

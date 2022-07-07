@@ -1535,14 +1535,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 "cwa" : cwa,
                 "thresholds" : threshold,
                 "ohh_metric" : ohh_metric,
-                "senstivity" : tp / (tp + fn),
+                "sensitivity" : tp / (tp + fn),
                 "specificity" : tn / (tn + fp)
             })
         thresholds_df = pd.DataFrame(cwa_thresholds)
         if thresholds_df.shape[0] > 0:
             thresholds_df.set_index("thresholds").plot()
             plt.savefig("thresholds.png")
-            ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df.set_index("thresholds")["cwa"].idxmax()
+            ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df.set_index("thresholds")["sensitivity"].idxmax()
         else:
             logger.error("THRESHOLD NOT CHANGED!")
         logger.info("Final threshold: {}".format(ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl]))

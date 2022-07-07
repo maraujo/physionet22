@@ -189,6 +189,7 @@ RUN_TEST_lbl = "RUN_TEST"
 FINAL_DECISION_THRESHOLD_lbl = "FINAL_DECISION_THRESHOLD"
 MIN_SENS_AND_SPEC_lbl = "MIN_SENS_AND_SPEC"
 
+
 ALGORITHM_HPS = {
     EMBS_SIZE_lbl : 2,
     MIN_SENS_AND_SPEC_lbl : 0.60,
@@ -1551,6 +1552,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
             logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
         else:
             logger.error("THRESHOLD NOT CHANGED!")
+            raise Exception("THRESHOLD NOT CHANGED!")
+            
         logger.info("Final threshold: {}".format(ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl]))
         logger.info(pprint.pformat(decision_evaluation))
         # Embs Size : [16, 64, 256]

@@ -22,6 +22,7 @@ def process_folder(commit="current"):
             os.system("rm -r model")
             os.system("rm -r recordings_aux")
             os.system("rm -r images_aux")
+            os.system("rm -r __pycache__")
             os.system("python train_model.py /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/train model".format(fold))
             os.system("python run_model.py model /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/test test_outputs".format(fold))
             os.system("python evaluate_model.py /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/test test_outputs/ model".format(fold))

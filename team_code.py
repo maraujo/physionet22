@@ -104,7 +104,8 @@ import tensorflow_decision_forests as tfdf
 from tensorboard.plugins.hparams import api as hpar
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 
-
+demographics = ['pregnancy_status', 'weight', 'height', 'sex', 'bmi', 'Child', 'Adolescent', 'Infant']
+age_encoding = np.array(['Child', 'Adolescent', 'Infant'])
 
 REAL_SR = 4000
 FIGURE_SIZE = 3
@@ -704,7 +705,11 @@ def clean_folder(folder_path):
 NOISE_DETECTION_WORKING_DIR = "./" 
 NOISE_DETECTION_IMGS_PATH = os.path.join(NOISE_DETECTION_WORKING_DIR, "noise_detection_sandbox")
 
-def ohh_compute_cost(labels, outputs):
+def ohh_compute_cost(labels_proba, outputs_proba):
+    labels = np.array(labels_proba) > 0.5
+    outputs = np.array(outputs_proba) > 0.5
+    labels = enc.transform(labels.reshape(-1,1)).toarray()
+    outputs = enc.transform(outputs.reshape(-1,1)).toarray()
     return compute_cost(labels, outputs, ['Abnormal', 'Normal'], ['Abnormal', 'Normal'])
     
 def xgbobjective(space):
@@ -1698,19 +1703,24 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 save_traces=True
             )
     # Train outcome model
-    patients_file_informations_df["weight"] = patients_file_informations_df["weight"].fillna(patients_file_informations_df["weight"].mean())
-    patients_file_informations_df["height"] = patients_file_informations_df["height"].fillna(patients_file_informations_df["height"].mean())
-    patients_file_informations_df["age"] = patients_file_informations_df["age"].fillna(patients_file_informations_df["age"].mode()[0])
-    patients_file_informations_df["age"] = patients_file_informations_df["age"].replace("nan", patients_file_informations_df["age"].mode()[0]).values
+    weight_mean = patients_file_informations_df["weight"].mean()
+    height_mean = patients_file_informations_df["height"].mean()
+    age_mode = patients_file_informations_df["age"].mode()[0]
+    gender_mode = patients_file_informations_df["sex"].mode()[0]
+    patients_file_informations_df["weight"] = patients_file_informations_df["weight"].fillna(weight_mean)
+    patients_file_informations_df["height"] = patients_file_informations_df["height"].fillna(height_mean)
+    patients_file_informations_df["age"] = patients_file_informations_df["age"].fillna(age_mode)
+    patients_file_informations_df["age"] = patients_file_informations_df["age"].replace("nan", age_mode).values
     patients_file_informations_df["bmi"] = patients_file_informations_df["weight"] / ((patients_file_informations_df["height"] / 100)**2)
-    patients_file_informations_df["sex"] = (patients_file_informations_df["sex"] == "Male").astype(float)
+    patients_file_informations_df["sex"] = (patients_file_informations_df["sex"] == "Male").fillna(gender_mode).astype(float)
     patients_file_informations_df["pregnancy_status"] = patients_file_informations_df["pregnancy_status"].astype(float)
-    vocab_age = feature_column.categorical_column_with_vocabulary_list('Type', patients_file_informations_df["age"].unique())
-    age_column_indicator = feature_column.indicator_column(vocab_age)
-    patients_file_informations_df = pd.concat([patients_file_informations_df, pd.get_dummies(patients_file_informations_df["age"])], axis=1)
-    demographics = ["pregnancy_status", "weight", "height", "sex", "bmi"] +  patients_file_informations_df["age"].unique().tolist()
+    age_dummified = pd.DataFrame.from_records(patients_file_informations_df["age"].apply(lambda x: x == age_encoding), columns = age_encoding).astype(int)
+    patients_file_informations_df = pd.concat([patients_file_informations_df, age_dummified], axis=1)
+    # demographics = ["pregnancy_status", "weight", "height", "sex", "bmi"] +  patients_file_informations_df["age"].unique().tolist()
     patients_file_informations_values_df = patients_file_informations_df[demographics]
-    patients_file_informations_values_df = (patients_file_informations_values_df - patients_file_informations_values_df.mean()) / patients_file_informations_values_df.std()
+    patient_means = patients_file_informations_values_df.mean()
+    patient_stds = patients_file_informations_values_df.std()
+    patients_file_informations_values_df = (patients_file_informations_values_df - patient_means) / patient_stds
     patients_file_informations_df[demographics] = patients_file_informations_values_df[demographics].values
     patients_file_informations_df["patient_id"] = patients_file_informations_df["file_prefix"].apply(lambda x: x.split("_")[0])
     patients_file_informations_df = patients_file_informations_df.drop_duplicates(subset=["patient_id"])
@@ -1738,18 +1748,21 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # model.run_eagerly
     
 
-    # hyperparameter_grid = {
-    #     'n_estimators': [100, 400, 800],
-    #     'max_depth': [3, 6, 9],
-    #     'learning_rate': [0.05, 0.1, 0.20],
-    #     'min_child_weight': [1, 10, 100]
-    # }
-    # challenge_cost = make_scorer(ohh_compute_cost, greater_is_better=False)
-    # import ipdb;ipdb.set_trace()
-    # pass
-    # random_search = RandomizedSearchCV(xgb, param_distributions=hyperparameter_grid, n_iter=5, scoring=challenge_cost, n_jobs=4, cv=None, verbose=3, random_state=42)
-    # random_search.fit(train_input_X, train_input_y)
-    
+    hyperparameter_grid = {
+        'n_estimators': [100, 400, 800],
+        'max_depth': [3, 6, 9, 15],
+        'gamma' : [1, 2, 3, 5, 9],
+        'reg_alpha' : [10, 20, 40, 60, 150],
+        'learning_rate': [0.05, 0.1, 0.20, 0.3],
+        'min_child_weight': [1, 5, 10, 20, 100]
+    }
+    challenge_cost = make_scorer(ohh_compute_cost, greater_is_better=False)
+    xgb_classifier = xgb.XGBClassifier(eval_metric=challenge_cost)
+    random_search = RandomizedSearchCV(xgb_classifier, param_distributions=hyperparameter_grid, n_iter=5, scoring=challenge_cost, n_jobs=4, cv=None, verbose=3, random_state=42)
+    random_search.fit(np.concatenate([train_input_X, val_input_X]), np.concatenate([train_input_y, val_input_y]))
+    test_prob = random_search.best_estimator_.predict(test_input_X)
+    test_cost = ohh_compute_cost(test_prob, test_input_y)
+    logger.info("Expected Outcome Cost: {}".format(test_cost))
     
     
     # train_outcome_df_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1)))
@@ -1777,7 +1790,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # murmur_outcome_new.fit(train_outcome_df, validation_data=val_outcome_df)
     
     # # Save the model.
-    save_challenge_model(model_folder, noise_model_new, murmur_model_new, murmur_decision_new)
+    save_challenge_model(model_folder, noise_model_new, murmur_model_new, murmur_decision_new, random_search.best_estimator_, weight_mean, height_mean, age_mode, gender_mode, patient_means, patient_stds)
     tf.keras.backend.clear_session()
     # clean_current_path()
     if verbose >= 1:
@@ -1789,16 +1802,16 @@ def load_challenge_model(model_folder, verbose):
     noise_model = load_model(os.path.join(model_folder, 'noise_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_model = load_model(os.path.join(model_folder, 'murmur_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_decision_model = load_model(os.path.join(model_folder, 'murmur_decision_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+    outcome_model = xgb.Booster()
+    outcome_model.load_model(os.path.join(model_folder, "outcome_model.json"))
     models_info = pd.read_pickle(os.path.join(model_folder,"models_info.pickle"))
-    return {"noise_model" : noise_model, 
-            "murmur_model" : murmur_model, 
-            "murmur_decision_model": murmur_decision_model,
-            EMBDS_PER_PATIENTS_lbl : ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],
-            EMBS_SIZE_lbl : models_info[EMBS_SIZE_lbl],
-            NOISE_IMAGE_SIZE_lbl : models_info[NOISE_IMAGE_SIZE_lbl],
-            MURMUR_IMAGE_SIZE_lbl : models_info[MURMUR_IMAGE_SIZE_lbl],
-            FINAL_DECISION_THRESHOLD_lbl : models_info[FINAL_DECISION_THRESHOLD_lbl]
-            }
+    models_info = models_info.to_dict()
+    models_info["noise_model"] = noise_model
+    models_info["murmur_model"] = murmur_model
+    models_info["murmur_decision_model"] = murmur_decision_model
+    models_info["outcome_model"] = outcome_model
+    models_info[EMBDS_PER_PATIENTS_lbl] = ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]
+    return models_info
 
 def ccm(labels, outputs):
     assert(np.shape(labels)[0] == np.shape(outputs)[0])
@@ -1914,11 +1927,39 @@ def run_challenge_model(model, data, recordings, verbose):
     absent_prob = 1 - present_prob
     
     murmur_probabilities = np.array([present_prob, 0, absent_prob])
-    outcome_probabilities = np.array([present_prob, absent_prob])
+    
+    #Prepare data for outcome prediction
+    # Train outcome model
+    patient_demographics = pd.Series({
+                        "murmur" : get_murmur(data),
+                        "outcome" : get_outcome(data),
+                        "pregnancy_status" : get_pregnancy_status(data),
+                        "weight" : get_weight(data),
+                        "height" : get_height(data),
+                        "sex" : get_sex(data),
+                        "age" :  get_age(data),
+                    })
+    patient_demographics["pregnancy_status"] = patient_demographics.to_frame().T["pregnancy_status"].fillna(False)[0]
+    patient_demographics["pregnancy_status"] = patient_demographics["pregnancy_status"].astype(float)
+    patient_demographics["weight"] = patient_demographics.to_frame().T["weight"].fillna(model["weight_mean"])[0]
+    patient_demographics["height"] = patient_demographics.to_frame().T["height"].fillna(model["height_mean"])[0]
+    patient_demographics["age"] = patient_demographics.to_frame().T["age"].fillna(model["age_mode"])[0]
+    patient_demographics["age"] = patient_demographics.to_frame().T["age"].replace("nan", model["age_mode"])[0]
+    patient_demographics["sex"] = patient_demographics.to_frame().T["sex"].fillna(model["gender_mode"])[0]
+    patient_demographics["sex"] = int(patient_demographics["sex"] == "Male")
+    patient_demographics["bmi"] = patient_demographics["weight"] / ((patient_demographics["height"] / 100)**2)
+    age_dummified = (patient_demographics["age"] == age_encoding).astype(int)
+    
+    patient_info = np.concatenate([patient_demographics[demographics[:-3]].values, age_dummified])
+    patient_info = (patient_info - model["patient_means"].values) /  model["patient_stds"].values
+    patient_outcome_X = np.concatenate([patient_info, embs_df.values.flatten()])
+    outcome_proba = model['outcome_model'].predict(xgb.core.DMatrix(patient_outcome_X.reshape(1, -1)))[0]
+    
+    outcome_probabilities = np.array([outcome_proba, 1 - outcome_proba])
     probabilities = np.concatenate([murmur_probabilities, outcome_probabilities])
     
     murmur_labels = murmur_probabilities > model[FINAL_DECISION_THRESHOLD_lbl]
-    outcome_labels = outcome_probabilities > model[FINAL_DECISION_THRESHOLD_lbl]
+    outcome_labels = outcome_probabilities > 0.5
     labels = np.concatenate([murmur_labels, outcome_labels])
     classes = murmur_classes + outcome_classes
     # import ipdb;ipdb.set_trace()
@@ -1965,16 +2006,23 @@ def run_challenge_model(model, data, recordings, verbose):
 ################################################################################
 
 # Save your trained model.
-def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decision_model):
+def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decision_model, outcome_model, weight_mean, height_mean, age_mode, gender_mode, patient_means, patient_stds):
     noise_model.save(os.path.join(model_folder, "noise_model.h5"))
     murmur_model.save(os.path.join(model_folder, "murmur_model.h5"))
+    outcome_model.save_model(os.path.join(model_folder, "outcome_model.json"))
     murmur_decision_model.save(os.path.join(model_folder, "murmur_decision_model.h5"))
     pd.Series({
         EMBDS_PER_PATIENTS_lbl : ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],
         EMBS_SIZE_lbl : ALGORITHM_HPS[EMBS_SIZE_lbl],
         NOISE_IMAGE_SIZE_lbl : ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl],
         MURMUR_IMAGE_SIZE_lbl : ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl],
-        FINAL_DECISION_THRESHOLD_lbl : ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl]
+        FINAL_DECISION_THRESHOLD_lbl : ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl],
+        "weight_mean" : weight_mean,
+        "height_mean" : height_mean,
+        "age_mode" : age_mode,
+        "gender_mode" : gender_mode,
+        "patient_means" : patient_means,
+        "patient_stds" : patient_stds
     }).to_pickle(os.path.join(model_folder, "models_info.pickle"))
     
     if OHH_ARGS and ("AWS_ID" in OHH_ARGS):

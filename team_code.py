@@ -205,7 +205,7 @@ ALGORITHM_HPS = {
     MURMUR_IMAGE_SIZE_lbl : 108,
     VAL_FRAC_MURMUR_lbl : 0.3,
     NOISE_IMAGE_SIZE_lbl : 108,
-    REMOVE_NOISE_lbl : true,
+    REMOVE_NOISE_lbl : True,
     batch_size_murmur_lbl : 32,
     CNN_MURMUR_MODEL_lbl : True,
     N_DECISION_LAYERS_lbl : 1,

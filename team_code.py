@@ -1073,7 +1073,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                         loss="binary_crossentropy",
                         metrics=get_all_metrics())
             early_stopping_noise = tf.keras.callbacks.EarlyStopping(
-                monitor="val_auc",
+                monitor="val_loss",
                 min_delta=0.0001,
                 patience=30,
                 verbose=1,

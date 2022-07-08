@@ -9,6 +9,7 @@
 #
 ################################################################################
 
+import xgboost as xgb
 from gc import callbacks
 from pyclbr import Function
 from tabulate import tabulate
@@ -18,6 +19,7 @@ from helper_code import *
 import numpy as np, scipy as sp, scipy.stats, os, sys, joblib
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import RandomizedSearchCV, GridSearchCV
 from sklearn.ensemble import RandomForestClassifier
 from keras.models import load_model
 from urllib.request import urlopen, Request
@@ -47,7 +49,8 @@ import autokeras as ak
 import random
 from tensorflow import feature_column
 
-tf.keras.utils.set_random_seed(42)
+ORIGINAL_SEED = 42
+tf.keras.utils.set_random_seed(ORIGINAL_SEED)
 tf.config.run_functions_eagerly(True)
 # tf.data.experimental.enable_debug_mode()
 
@@ -82,7 +85,7 @@ import json
 from keras.engine.functional import Functional
 import tensorflow_addons as tfa
 import keras_tuner as kt
-
+from sklearn.metrics import make_scorer
 from autokeras.engine import node as node_module
 from autokeras.engine import tuner
 from autokeras.nodes import Input
@@ -98,7 +101,8 @@ from autokeras.engine import head as head_module
 from autokeras import graph
 from autokeras import keras_layers
 import tensorflow_decision_forests as tfdf
-from tensorboard.plugins.hparams import api as hp
+from tensorboard.plugins.hparams import api as hpar
+from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 
 
 
@@ -322,13 +326,13 @@ enc.fit([[True], [False]])
 class OHHGraph(graph.Graph):
   def _compile_keras_model(self, hp, model):
         # Specify hyperparameters from compile(...)
-        optimizer_name = hp.Choice(
+        optimizer_name = hpar.Choice(
             "optimizer",
             ["adam"],
             default="adam",
         )
         # TODO: add adadelta optimizer when it can optimize embedding layer on GPU.
-        learning_rate = hp.Choice(
+        learning_rate = hpar.Choice(
             "learning_rate", [1e-3, 1e-4], default=1e-3
         )
 
@@ -700,6 +704,28 @@ def clean_folder(folder_path):
 NOISE_DETECTION_WORKING_DIR = "./" 
 NOISE_DETECTION_IMGS_PATH = os.path.join(NOISE_DETECTION_WORKING_DIR, "noise_detection_sandbox")
 
+def ohh_compute_cost(labels, outputs):
+    return compute_cost(labels, outputs, ['Abnormal', 'Normal'], ['Abnormal', 'Normal'])
+    
+def xgbobjective(space):
+    #From: https://www.kaggle.com/code/prashant111/a-guide-on-xgboost-hyperparameters-tuning/notebook
+    clf=xgb.XGBClassifier( n_estimators =space['n_estimators'], max_depth = int(space['max_depth']), gamma = space['gamma'],
+                    reg_alpha = int(space['reg_alpha']),min_child_weight=int(space['min_child_weight']),
+                    colsample_bytree=int(space['colsample_bytree']))
+    
+    evaluation = [( space["X_train"], space["y_train"]), ( space["X_test"], space["y_test"])]
+    
+    clf.fit(space["X_train"], space["y_train"],
+            eval_set=evaluation, eval_metric="auc",
+            early_stopping_rounds=10,verbose=False)
+    
+
+    pred = clf.predict(space["X_test"])
+
+    cost = ohh_compute_cost(space["y_test"], pred>0.5)
+    print ("SCORE:", cost)
+    return {'loss': cost, 'status': STATUS_OK }
+
 def get_all_metrics():
     AUC_metric = tf.keras.metrics.AUC(name="auc", curve="PR")
     AUC_ROC_metric = tf.keras.metrics.AUC(name="auc_roc", curve="ROC")
@@ -860,6 +886,58 @@ def generate_patient_embeddings_folder_v2(patient_id, split, label, patient_embs
     # logger.info("Saved: " + destiny_file)
     return embs_df
     
+
+# Define total cost for algorithmic prescreening of m patients.
+def cost_algorithm(m):
+    return 10*m
+
+# Define total cost for expert screening of m patients out of a total of n total patients.
+def cost_expert(m, n):
+    return (25 + 397*(m/n) -1718*(m/n)**2 + 11296*(m/n)**4) * n
+
+# Define total cost for treatment of m patients.
+def cost_treatment(m):
+    return 10000*m
+
+# Define total cost for missed/late treatement of m patients.
+def cost_error(m):
+    return 50000*m
+
+def compute_cost(labels, outputs, label_classes, output_classes):
+    # Define positive and negative classes for referral and treatment.
+    positive_classes = ['Present', 'Unknown', 'Abnormal']
+    negative_classes = ['Absent', 'Normal']
+
+    # Compute confusion matrix.
+    A = compute_confusion_matrix(labels, outputs)
+
+    # Identify positive and negative classes for referral.
+    idx_label_positive = [i for i, x in enumerate(label_classes) if x in positive_classes]
+    idx_label_negative = [i for i, x in enumerate(label_classes) if x in negative_classes]
+    idx_output_positive = [i for i, x in enumerate(output_classes) if x in positive_classes]
+    idx_output_negative = [i for i, x in enumerate(output_classes) if x in negative_classes]
+
+    # Identify true positives, false positives, false negatives, and true negatives.
+    tp = np.sum(A[np.ix_(idx_output_positive, idx_label_positive)])
+    fp = np.sum(A[np.ix_(idx_output_positive, idx_label_negative)])
+    fn = np.sum(A[np.ix_(idx_output_negative, idx_label_positive)])
+    tn = np.sum(A[np.ix_(idx_output_negative, idx_label_negative)])
+    total_patients = tp + fp + fn + tn
+
+    # Compute total cost for all patients.
+    total_cost = cost_algorithm(total_patients) \
+        + cost_expert(tp + fp, total_patients) \
+        + cost_treatment(tp) \
+        + cost_error(fn)
+
+    # Compute mean cost per patient.
+    if total_patients > 0:
+        mean_cost = total_cost / total_patients
+    else:
+        mean_cost = float('nan')
+
+    return mean_cost
+
 
 def compute_confusion_matrix(labels, outputs):
     assert(np.shape(labels)[0] == np.shape(outputs)[0])
@@ -1499,79 +1577,90 @@ def train_challenge_model(data_folder, model_folder, verbose):
             )], workers= WORKERS)
         murmur_decision_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
         
-    else:
-        if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
-            murmur_decision_new = get_murmur_decision_model() 
-            # murmur_decision_new = get_murmur_decision_model_pretrained(murmur_model_new) 
+    else:        
+        # I have this while because for some random reason, the model does not converge. So, I keep increasing the patience untill it get out of local minima
+        converged = False
+        runs = 1
+        while not converged:
+            logger.warning("Run: {}".format(runs))
             
-        else:
-            murmur_decision_config = get_murmur_decision_model_configs()
-            murmur_decision_new = Functional.from_config(murmur_decision_config) 
-            murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
-        
-        
-        murmur_decision_new.fit(train_decision_dataset, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
-                monitor="val_auc",
-                min_delta=0,
-                patience=20,
-                verbose=0,
-                mode="max",
-                baseline=None,
-                restore_best_weights=True
-            )], workers=WORKERS)
-        
-        logger.info("Murmur Detection Model Classification Report")
-        decision_evaluation = murmur_decision_new.evaluate(test_decision_dataset, return_dict=True) 
-        logger.info("Find best threshold...")
-        
-        #Fuse train and test to choose decision thresholds? Doing this in faith since val has low number of samples.
-        test_predictions_proba = murmur_decision_new.predict(np.vstack(embs_train + embs_val + embs_test))
-        test_labels_original = np.array([*embs_label_train] + [*embs_label_val] + [*embs_label_test]).reshape(-1,1)
-        
-        # test_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
-        
-        # test_predictions_proba = murmur_decision_new.predict(test_decision_dataset)
-        cwa_thresholds = []
-        for threshold in np.arange(0,1,0.01):
-            test_labels = test_labels_original.copy()
-            test_predictions = (test_predictions_proba > threshold)
-            test_predictions = enc.transform(test_predictions).toarray()
-            # test_labels = np.vstack(test_decision_dataset.map(lambda x, y: y))
-            test_labels = enc.transform(test_labels).toarray()
-            tn, fp, fn, tp =  confusion_matrix(enc.inverse_transform(test_labels).flatten(), enc.inverse_transform(test_predictions).flatten(), labels=[False, True]).flatten()
-            all_positive = tp+fn
-            all_negative = tn+fp
-            if all_positive == 0 or all_negative == 0 or tn == 0:
-                continue
-            ohh_metric = (tp / all_positive) / (tn / all_negative)
-            if  (tp / (tp + fn)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl] or (tn / (tn + fp)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl]:
-                continue
+            if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
+                murmur_decision_new = get_murmur_decision_model() 
+                # murmur_decision_new = get_murmur_decision_model_pretrained(murmur_model_new) 
             
-            cwa = cwa_fn(test_labels, test_predictions, classes = ["Abnormal", "Normal"])
-            cwa_thresholds.append({
-                "cwa" : cwa,
-                "thresholds" : threshold,
-                "ohh_metric" : ohh_metric,
-                "sensitivity" : tp / (tp + fn),
-                "specificity" : tn / (tn + fp)
-            })
-        thresholds_df = pd.DataFrame(cwa_thresholds)
-        if thresholds_df.shape[0] > 0:
-            thresholds_df = thresholds_df.set_index("thresholds")
-            thresholds_df.plot()
-            plt.savefig("thresholds.png")
-            if thresholds_df.shape[0] > 5:
-                y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
-                x = thresholds_df.index.values
-                kn = KneeLocator(x, y, curve='convex', direction='decreasing')
-                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee
             else:
-                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
-            logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
-        else:
-            logger.error("THRESHOLD NOT CHANGED!")
-            raise Exception("THRESHOLD NOT CHANGED!")
+                murmur_decision_config = get_murmur_decision_model_configs()
+                murmur_decision_new = Functional.from_config(murmur_decision_config) 
+                murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
             
+            murmur_decision_new.fit(train_decision_dataset, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+                    monitor="val_auc",
+                    min_delta=0,
+                    patience=20 * runs,
+                    verbose=0,
+                    mode="max",
+                    baseline=None,
+                    restore_best_weights=True
+                )], workers=WORKERS)
+            
+            logger.info("Murmur Detection Model Classification Report")
+            decision_evaluation = murmur_decision_new.evaluate(test_decision_dataset, return_dict=True) 
+            logger.info("Find best threshold...")
+            
+            #Fuse train and test to choose decision thresholds? Doing this in faith since val has low number of samples.
+            test_predictions_proba = murmur_decision_new.predict(np.vstack(embs_train + embs_val + embs_test))
+            test_labels_original = np.array([*embs_label_train] + [*embs_label_val] + [*embs_label_test]).reshape(-1,1)
+            
+            # test_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
+            
+            # test_predictions_proba = murmur_decision_new.predict(test_decision_dataset)
+            cwa_thresholds = []
+            for threshold in np.arange(0,1,0.01):
+                test_labels = test_labels_original.copy()
+                test_predictions = (test_predictions_proba > threshold)
+                test_predictions = enc.transform(test_predictions).toarray()
+                # test_labels = np.vstack(test_decision_dataset.map(lambda x, y: y))
+                test_labels = enc.transform(test_labels).toarray()
+                tn, fp, fn, tp =  confusion_matrix(enc.inverse_transform(test_labels).flatten(), enc.inverse_transform(test_predictions).flatten(), labels=[False, True]).flatten()
+                all_positive = tp+fn
+                all_negative = tn+fp
+                if all_positive == 0 or all_negative == 0 or tn == 0:
+                    continue
+                ohh_metric = (tp / all_positive) / (tn / all_negative)
+                if  (tp / (tp + fn)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl] or (tn / (tn + fp)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl]:
+                    continue
+                
+                cwa = cwa_fn(test_labels, test_predictions, classes = ["Abnormal", "Normal"])
+                cwa_thresholds.append({
+                    "cwa" : cwa,
+                    "thresholds" : threshold,
+                    "ohh_metric" : ohh_metric,
+                    "sensitivity" : tp / (tp + fn),
+                    "specificity" : tn / (tn + fp)
+                })
+            thresholds_df = pd.DataFrame(cwa_thresholds)
+            if thresholds_df.shape[0] > 0:
+                thresholds_df = thresholds_df.set_index("thresholds")
+                thresholds_df.plot()
+                plt.savefig("thresholds.png")
+                if thresholds_df.shape[0] > 5:
+                    y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
+                    x = thresholds_df.index.values
+                    kn = KneeLocator(x, y, curve='convex', direction='decreasing')
+                    ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee
+                else:
+                    ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
+                logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
+                converged = True
+            else:
+                logger.error("THRESHOLD NOT CHANGED!")
+                if ALGORITHM_HPS[RUN_TEST_lbl]:
+                    converged = True
+                if runs == 50:
+                    raise Exception("THRESHOLD NOT CHANGED!")
+                runs += 1
+                tf.keras.utils.set_random_seed(ORIGINAL_SEED + runs)
+                
         logger.info("Final threshold: {}".format(ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl]))
         logger.info(pprint.pformat(decision_evaluation))
         # Embs Size : [16, 64, 256]
@@ -1593,7 +1682,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 EMBDS_PER_PATIENTS_lbl : ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],
                 RESHUFFLE_PATIENT_EMBS_N_lbl : ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl] 
             }
-            hp.hparams(hparams)  # record the values used in this trial
+            hpar.hparams(hparams)  # record the values used in this trial
             tf.summary.scalar("auc", decision_evaluation["auc"], step=1)
             tf.summary.scalar("auc_roc", decision_evaluation["auc_roc"], step=1)
             tf.summary.scalar("compute_weighted_accuracy", decision_evaluation["compute_weighted_accuracy"], step=1)
@@ -1643,12 +1732,25 @@ def train_challenge_model(data_folder, model_folder, verbose):
     test_input_y = input_y.loc[test_idx].values
     
     # tf.config.run_functions_eagerly(False)
-    # tuner = kt.tuners.RandomSearch(max_trials=20)
+    # tuner = tfdf.tuner.RandomSearch(num_trials=20)
     # tuner.discret("max_depth", [4, 5, 6, 7])
     # model = tfdf.keras.GradientBoostedTreesModel(tuner=tuner)
     # model.run_eagerly
+    
+
+    # hyperparameter_grid = {
+    #     'n_estimators': [100, 400, 800],
+    #     'max_depth': [3, 6, 9],
+    #     'learning_rate': [0.05, 0.1, 0.20],
+    #     'min_child_weight': [1, 10, 100]
+    # }
+    # challenge_cost = make_scorer(ohh_compute_cost, greater_is_better=False)
     # import ipdb;ipdb.set_trace()
-    # pass   
+    # pass
+    # random_search = RandomizedSearchCV(xgb, param_distributions=hyperparameter_grid, n_iter=5, scoring=challenge_cost, n_jobs=4, cv=None, verbose=3, random_state=42)
+    # random_search.fit(train_input_X, train_input_y)
+    
+    
     
     # train_outcome_df_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1)))
     
@@ -1912,7 +2014,7 @@ def get_murmur_decision_model():
     return murmur_decision_new
 
 def generate_kernel_initialization():
-    return tf.keras.initializers.LecunNormal(seed=42)    
+    return tf.keras.initializers.LecunNormal()    
      
 def get_murmur_decision_model_configs():
     murmur_decision_config = {'name': 'model', 'layers': [{'class_name': 'InputLayer', 'config': {'batch_input_shape': (None, ALGORITHM_HPS[EMBS_SIZE_lbl] * ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]), 'dtype': 'float32', 'sparse': False, 'ragged': False, 'name': 'input_1'}, 'name': 'input_1', 'inbound_nodes': []}, {'class_name': 'Custom>CastToFloat32', 'config': {'name': 'cast_to_float32', 'trainable': True, 'dtype': 'float32'}, 'name': 'cast_to_float32', 'inbound_nodes': [[['input_1', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense', 'trainable': True, 'dtype': 'float32', 'units': 1024, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense', 'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]]}, {'class_name': 'ReLU', 'config': {'name': 're_lu', 'trainable': True, 'dtype': 'float32', 'max_value': None, 'negative_slope': array(0., dtype=float32), 'threshold': array(0., dtype=float32)}, 'name': 're_lu', 'inbound_nodes': [[['dense', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense_1', 'trainable': True, 'dtype': 'float32', 'units': 1, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense_1', 'inbound_nodes': [[['re_lu', 0, 0, {}]]]}, {'class_name': 'Activation', 'config': {'name': 'classification_head_1', 'trainable': True, 'dtype': 'float32', 'activation': 'sigmoid'}, 'name': 'classification_head_1', 'inbound_nodes': [[['dense_1', 0, 0, {}]]]}], 'input_layers': [['input_1', 0, 0]], 'output_layers': [['classification_head_1', 0, 0]]}

@@ -190,6 +190,9 @@ RUN_TEST_lbl = "RUN_TEST"
 FINAL_DECISION_THRESHOLD_lbl = "FINAL_DECISION_THRESHOLD"
 MIN_SENS_AND_SPEC_lbl = "MIN_SENS_AND_SPEC"
 REMOVE_NOISE_lbl = "REMOVE_NOISE"
+LEARNING_RATE_NOISE_lbl = "LEARNING_RATE_NOISE"
+LEARNING_RATE_MURMUR_lbl = "LEARNING_RATE_MURMUR"
+LEARNING_RATE_DECISION_lbl = "LEARNING_RATE_DECISION"
 
 ALGORITHM_HPS = {
     EMBS_SIZE_lbl : 2,
@@ -229,7 +232,10 @@ ALGORITHM_HPS = {
     RUN_AUTOKERAS_DECISION_lbl : False,
     FINAL_TRAINING_lbl : True,
     USE_COMPLEX_MODELS_lbl : True,
-    RUN_TEST_lbl : False
+    RUN_TEST_lbl : False,
+    LEARNING_RATE_NOISE_lbl : 0.0001,
+    LEARNING_RATE_MURMUR_lbl : 0.001,
+    LEARNING_RATE_DECISION_lbl : 0.001,
 }
 
 
@@ -1069,7 +1075,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 noise_model_new.add(tf.keras.layers.Dropout(.5))
                 noise_model_new.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation='relu', kernel_initializer=generate_kernel_initialization()))
                 noise_model_new.add(tf.keras.layers.Dense(1, activation='sigmoid', kernel_initializer=generate_kernel_initialization()))
-                noise_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), 
+                noise_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': ALGORITHM_HPS[LEARNING_RATE_NOISE_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), 
                         loss="binary_crossentropy",
                         metrics=get_all_metrics())
             early_stopping_noise = tf.keras.callbacks.EarlyStopping(
@@ -1350,7 +1356,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             
         else:
             murmur_model_new = tf.keras.models.clone_model(noise_model_new)
-            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
         murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
                              epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
@@ -1501,7 +1507,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         else:
             murmur_decision_config = get_murmur_decision_model_configs()
             murmur_decision_new = Functional.from_config(murmur_decision_config) 
-            murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 2e-05,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+            murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
         
         murmur_decision_new.fit(train_decision_dataset, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
@@ -1902,7 +1908,7 @@ def get_murmur_decision_model():
             model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid", kernel_initializer=generate_kernel_initialization()))
     murmur_decision_new = tf.keras.Sequential(model_layers)
-    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate': 0.0001,'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_DECISION_lbl],'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
     return murmur_decision_new
 
 def generate_kernel_initialization():
@@ -1941,6 +1947,7 @@ def get_murmur_model():
         noise_layer_4, noise_layer_embs, noise_layer_5])
     else:
         murmur_model = tf.keras.models.Sequential()
+        murmur_model.add(tf.keras.layers.Rescaling(1./127.5))
         murmur_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), kernel_initializer=generate_kernel_initialization(), activation='relu', input_shape=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], 3)))
         murmur_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
         if ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]:
@@ -1958,7 +1965,7 @@ def get_murmur_model():
         murmur_model.add(tf.keras.layers.Dense(1, activation='sigmoid', kernel_initializer=generate_kernel_initialization()))
                 
     optimizer = tf.keras.optimizers.Adam(
-                       learning_rate=0.0001
+                       learning_rate=ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl]
                     )  
     murmur_model.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
     return murmur_model
@@ -1970,6 +1977,7 @@ def get_murmur_model_configs():
 
 def get_noise_model_v2(): 
     noise_model = tf.keras.models.Sequential()
+    noise_model.add(tf.keras.layers.Rescaling(1./127.5))
     noise_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), activation='relu', kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
     noise_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
     if ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]:
@@ -1987,7 +1995,7 @@ def get_noise_model_v2():
     noise_model.add(tf.keras.layers.Dense(1, activation='sigmoid', kernel_initializer=generate_kernel_initialization()))
                 
     optimizer = tf.keras.optimizers.Adam(
-                       learning_rate=0.0001
+                       learning_rate=ALGORITHM_HPS[LEARNING_RATE_NOISE_lbl]
                     )  
     noise_model.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
     

@@ -189,7 +189,7 @@ USE_COMPLEX_MODELS_lbl = "USE_COMPLEX_MODELS"
 RUN_TEST_lbl = "RUN_TEST"
 FINAL_DECISION_THRESHOLD_lbl = "FINAL_DECISION_THRESHOLD"
 MIN_SENS_AND_SPEC_lbl = "MIN_SENS_AND_SPEC"
-
+REMOVE_NOISE_lbl = "REMOVE_NOISE"
 
 ALGORITHM_HPS = {
     EMBS_SIZE_lbl : 2,
@@ -205,6 +205,7 @@ ALGORITHM_HPS = {
     MURMUR_IMAGE_SIZE_lbl : 108,
     VAL_FRAC_MURMUR_lbl : 0.3,
     NOISE_IMAGE_SIZE_lbl : 108,
+    REMOVE_NOISE_lbl : true,
     batch_size_murmur_lbl : 32,
     CNN_MURMUR_MODEL_lbl : True,
     N_DECISION_LAYERS_lbl : 1,
@@ -1080,7 +1081,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 baseline=None,
                 restore_best_weights=True,
             )
-            noise_model_new.fit(noise_detection_dataset_train, class_weight={0:5,1:1}, batch_size = batch_size, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], epochs = NOISE_EPOCHS, callbacks=[early_stopping_noise], validation_data=noise_detection_dataset_val, workers= WORKERS)
+            noise_model_new.fit(noise_detection_dataset_train, class_weight={0:3,1:0.5}, batch_size = batch_size, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], epochs = NOISE_EPOCHS, callbacks=[early_stopping_noise], validation_data=noise_detection_dataset_val, workers= WORKERS)
 
             logger.info("Noise Model Classification Report")
             logger.info(pprint.pformat(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True)))
@@ -1287,7 +1288,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
         if not ALGORITHM_HPS[RUN_TEST_lbl] and files_to_exclude.shape[0] > 0:
             for filepath in tqdm(files_to_exclude["filepath"]):
                 logger.info("Noisy file: {}".format(filepath))
-                os.remove(filepath)
+                if ALGORITHM_HPS[REMOVE_NOISE_lbl]:
+                    os.remove(filepath)
+                else:
+                    logger.info("Remove noise files canceled.")
     else:
         logger.info("No files to remove noise.")
     

@@ -1081,7 +1081,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 baseline=None,
                 restore_best_weights=True,
             )
-            noise_model_new.fit(noise_detection_dataset_train, class_weight={0:3,1:0.5}, batch_size = batch_size, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], epochs = NOISE_EPOCHS, callbacks=[early_stopping_noise], validation_data=noise_detection_dataset_val, workers= WORKERS)
+            noise_model_new.fit(noise_detection_dataset_train, class_weight={0:3,1:0.2}, batch_size = batch_size, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], epochs = NOISE_EPOCHS, callbacks=[early_stopping_noise], validation_data=noise_detection_dataset_val, workers= WORKERS)
 
             logger.info("Noise Model Classification Report")
             logger.info(pprint.pformat(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True)))

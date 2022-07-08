@@ -1346,7 +1346,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             
         else:
             murmur_model_new = tf.keras.models.clone_model(noise_model_new)
-            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.SigmoidFocalCrossEntropy(), metrics=get_all_metrics())
+            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': 0.0001,'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
         murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
                              epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
@@ -1898,7 +1898,7 @@ def get_murmur_decision_model():
             model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid", kernel_initializer=generate_kernel_initialization()))
     murmur_decision_new = tf.keras.Sequential(model_layers)
-    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate': 0.0001,'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss=tfa.losses.SigmoidFocalCrossEntropy(), metrics=get_all_metrics())
+    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate': 0.0001,'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
     return murmur_decision_new
 
 def generate_kernel_initialization():
@@ -1953,10 +1953,10 @@ def get_murmur_model():
         murmur_model.add(tf.keras.layers.BatchNormalization())
         murmur_model.add(tf.keras.layers.Dense(1, activation='sigmoid', kernel_initializer=generate_kernel_initialization()))
                 
-    optimizer = tf.keras.optimizers.SGD(
+    optimizer = tf.keras.optimizers.Adam(
                        learning_rate=0.0001
                     )  
-    murmur_model.compile(optimizer=optimizer, metrics=get_all_metrics(), loss=tfa.losses.SigmoidFocalCrossEntropy(),)
+    murmur_model.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
     return murmur_model
 
 def get_murmur_model_configs(): 
@@ -1982,10 +1982,10 @@ def get_noise_model_v2():
     noise_model.add(tf.keras.layers.BatchNormalization())
     noise_model.add(tf.keras.layers.Dense(1, activation='sigmoid', kernel_initializer=generate_kernel_initialization()))
                 
-    optimizer = tf.keras.optimizers.SGD(
+    optimizer = tf.keras.optimizers.Adam(
                        learning_rate=0.0001
                     )  
-    noise_model.compile(optimizer=optimizer, metrics=get_all_metrics(), loss=tfa.losses.SigmoidFocalCrossEntropy(),)
+    noise_model.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
     
     # noise_input_config = {'batch_input_shape': (None, ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], NOISE_IMAGE_SIZE, 3),  'dtype': 'float32',  'name': 'input_1', 'ragged': False, 'sparse': False }
     # noise_cast_to_float_config = {'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}

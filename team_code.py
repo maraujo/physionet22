@@ -1665,6 +1665,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     raise Exception("THRESHOLD NOT CHANGED!")
                 runs += 1
                 tf.keras.utils.set_random_seed(ORIGINAL_SEED + runs)
+                tf.keras.backend.clear_session()
                 
         logger.info("Final threshold: {}".format(ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl]))
         logger.info(pprint.pformat(decision_evaluation))

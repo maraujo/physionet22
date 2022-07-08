@@ -1077,7 +1077,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 min_delta=0.0001,
                 patience=30,
                 verbose=1,
-                mode="max",
+                mode="min",
                 baseline=None,
                 restore_best_weights=True,
             )

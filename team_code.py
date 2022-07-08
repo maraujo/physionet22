@@ -1080,7 +1080,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 baseline=None,
                 restore_best_weights=True,
             )
-            noise_model_new.fit(noise_detection_dataset_train, class_weight={0:3,1:1}, batch_size = batch_size, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], epochs = NOISE_EPOCHS, callbacks=[early_stopping_noise], validation_data=noise_detection_dataset_val, workers= WORKERS)
+            noise_model_new.fit(noise_detection_dataset_train, class_weight={0:5,1:1}, batch_size = batch_size, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], epochs = NOISE_EPOCHS, callbacks=[early_stopping_noise], validation_data=noise_detection_dataset_val, workers= WORKERS)
 
             logger.info("Noise Model Classification Report")
             logger.info(pprint.pformat(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True)))
@@ -1283,7 +1283,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         logger.info("Files to evaluated by noise: {}".format(noise_murmur_df_list.shape[0]))
         logger.info("First 10: {}".format(noise_murmur_df_list.head(10)))      
         files_to_exclude = noise_murmur_df_list[noise_murmur_df_list["predictions"] > 0.5]
-        logger.info("Remove noisy files:")
+        logger.info("Remove noisy files: {}".format(files_to_exclude.shape[0]))
         if not ALGORITHM_HPS[RUN_TEST_lbl] and files_to_exclude.shape[0] > 0:
             for filepath in tqdm(files_to_exclude["filepath"]):
                 logger.info("Noisy file: {}".format(filepath))

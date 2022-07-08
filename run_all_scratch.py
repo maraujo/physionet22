@@ -11,6 +11,7 @@ SECRET_KEY = input("Aws SECRET_KEY: ")
 os.system("apt install -y vim")
 os.system("apt install -y htop")
 os.system("apt install -y libsndfile1")
+os.system("apt install -y unzip")
 os.system("rm -r /physionet_data/challenge/files/cross-validation-data-1-0-3/")
 
 os.system("mkdir -p /physionet_data/challenge/files/cross-validation-data-1-0-3/")

@@ -239,8 +239,8 @@ ALGORITHM_HPS = {
     USE_COMPLEX_MODELS_lbl : True,
     RUN_TEST_lbl : False,
     LEARNING_RATE_NOISE_lbl : 0.0001,
-    LEARNING_RATE_MURMUR_lbl : 0.001,
-    LEARNING_RATE_DECISION_lbl : 0.001,
+    LEARNING_RATE_MURMUR_lbl : 0.0001,
+    LEARNING_RATE_DECISION_lbl : 0.0001,
 }
 
 
@@ -1759,7 +1759,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     }
     challenge_cost = make_scorer(ohh_compute_cost, greater_is_better=False)
     xgb_classifier = xgb.XGBClassifier(eval_metric=challenge_cost)
-    random_search = RandomizedSearchCV(xgb_classifier, param_distributions=hyperparameter_grid, n_iter=5, scoring=challenge_cost, n_jobs=4, cv=None, verbose=3, random_state=42)
+    random_search = RandomizedSearchCV(xgb_classifier, param_distributions=hyperparameter_grid, n_iter= 5 if ALGORITHM_HPS[RUN_TEST_lbl] else 100, scoring=challenge_cost, n_jobs=4, cv=None, verbose=3, random_state=42)
     random_search.fit(np.concatenate([train_input_X, val_input_X]), np.concatenate([train_input_y, val_input_y]))
     test_prob = random_search.best_estimator_.predict(test_input_X)
     test_cost = ohh_compute_cost(test_prob, test_input_y)
@@ -2094,11 +2094,12 @@ def get_murmur_model():
         noise_layer_5 = tf.keras.layers.Dense.from_config(noise_dense_config)
         # noise_layer_6 = tf.keras.layers.Activation.from_config(noise_classification_head_config)
         
-        murmur_model = tf.keras.Sequential([noise_layer_0, noise_layer_1, tf.keras.layers.Rescaling(1./127.5), noise_layer_3,  
+        murmur_model = tf.keras.Sequential([noise_layer_0, noise_layer_1, tf.keras.layers.Rescaling(1./127.5, offset=-1), noise_layer_3,  
         noise_layer_4, noise_layer_embs, noise_layer_5])
     else:
         murmur_model = tf.keras.models.Sequential()
-        murmur_model.add(tf.keras.layers.Rescaling(1./127.5))
+        murmur_model.add(CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}))
+        murmur_model.add(tf.keras.layers.Rescaling(1./127.5, offset=-1))
         murmur_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), kernel_initializer=generate_kernel_initialization(), activation='relu', input_shape=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], 3)))
         murmur_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
         if ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]:
@@ -2128,7 +2129,8 @@ def get_murmur_model_configs():
 
 def get_noise_model_v2(): 
     noise_model = tf.keras.models.Sequential()
-    noise_model.add(tf.keras.layers.Rescaling(1./127.5))
+    noise_model.add(CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}))
+    noise_model.add(tf.keras.layers.Rescaling(1./127.5, offset=-1))
     noise_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), activation='relu', kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
     noise_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
     if ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]:
@@ -2199,7 +2201,7 @@ def get_noise_model():
     noise_layer_5 = tf.keras.layers.Dense.from_config(noise_dense_config)
     noise_layer_6 = tf.keras.layers.Activation.from_config(noise_classification_head_config)
     
-    noise_model = tf.keras.Sequential([noise_layer_0, noise_layer_1, tf.keras.layers.Rescaling(1./127.5), noise_layer_3,  
+    noise_model = tf.keras.Sequential([noise_layer_0, noise_layer_1, tf.keras.layers.Rescaling(1./127.5, offset=-1), noise_layer_3,  
     noise_layer_4, noise_layer_5, noise_layer_6])
    
     

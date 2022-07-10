@@ -1740,7 +1740,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     patients_file_informations_df = patients_file_informations_df.merge(embs_patient_id_df, left_on="patient_id", right_on="patient_id")
     inputs_features = demographics + ["embs"] 
     input_X = pd.concat([pd.DataFrame(np.vstack(patients_file_informations_df["embs"].values)), patients_file_informations_df[[*filter(lambda x: x != "embs", inputs_features)]]], axis=1)
-    input_y = (patients_file_informations_df["outcome"] == "Abnormal").astype(float)
+    input_y = (patients_file_informations_df["outcome"] == "Abnormal").astype(int)
     train_idx = patients_file_informations_df[patients_file_informations_df["split"] == "train"].index
     val_idx = patients_file_informations_df[patients_file_informations_df["split"] == "val"].index
     test_idx = patients_file_informations_df[patients_file_informations_df["split"] == "test"].index
@@ -1984,9 +1984,7 @@ def run_challenge_model(model, data, recordings, verbose):
     patient_info = np.concatenate([patient_demographics[demographics[:-3]].values, age_dummified])
     patient_info = (patient_info - model["patient_means"].values) /  model["patient_stds"].values
     patient_outcome_X = np.concatenate([patient_info, embs_df.values.flatten()])
-    import ipdb;ipdb.set_trace()
-    pass
-    outcome_proba = model['outcome_model'].predict(xgb.core.DMatrix(patient_outcome_X.reshape(1, -1)))[0]
+    outcome_proba = model['outcome_model'].predict(patient_outcome_X.reshape(1, -1).astype(float32))[0][0]
     
     outcome_probabilities = np.array([outcome_proba, 1 - outcome_proba])
     probabilities = np.concatenate([murmur_probabilities, outcome_probabilities])
@@ -2090,7 +2088,7 @@ def get_outcome_decision_model():
             model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid", kernel_initializer=generate_kernel_initialization()))
     murmur_decision_new = tf.keras.Sequential(model_layers)
-    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_DECISION_lbl],'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=[ohh_compute_cost_tf] + get_all_metrics())
+    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate':10*ALGORITHM_HPS[LEARNING_RATE_DECISION_lbl],'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=[ohh_compute_cost_tf] + get_all_metrics())
     return murmur_decision_new
 
 def get_murmur_decision_model():

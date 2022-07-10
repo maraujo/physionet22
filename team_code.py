@@ -309,7 +309,7 @@ else:
     logger.info("Running full")
     MURMUR_EPOCHS = 1000
     NOISE_EPOCHS = 1000
-    MURMUR_DECISION_EPOCHS = 150
+    MURMUR_DECISION_EPOCHS = 500
     MAX_TRIALS = 100
 
 #Download autoencoder
@@ -704,6 +704,15 @@ def clean_folder(folder_path):
                 
 NOISE_DETECTION_WORKING_DIR = "./" 
 NOISE_DETECTION_IMGS_PATH = os.path.join(NOISE_DETECTION_WORKING_DIR, "noise_detection_sandbox")
+
+def ohh_compute_cost_tf(labels_proba, outputs_proba):
+    labels = labels_proba > 0.5
+    outputs = outputs_proba > 0.5
+    labels = labels.numpy()
+    outputs = outputs.numpy()
+    labels = enc.transform(labels.reshape(-1,1)).toarray()
+    outputs = enc.transform(outputs.reshape(-1,1)).toarray()
+    return compute_cost(labels, outputs, ['Abnormal', 'Normal'], ['Abnormal', 'Normal'])
 
 def ohh_compute_cost(labels_proba, outputs_proba):
     labels = np.array(labels_proba) > 0.5
@@ -1747,23 +1756,42 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # tuner.discret("max_depth", [4, 5, 6, 7])
     # model = tfdf.keras.GradientBoostedTreesModel(tuner=tuner)
     # model.run_eagerly
-    
+    # FFN Decision
 
-    hyperparameter_grid = {
-        'n_estimators': [100, 400, 800],
-        'max_depth': [3, 6, 9, 15],
-        'gamma' : [1, 2, 3, 5, 9],
-        'reg_alpha' : [10, 20, 40, 60, 150],
-        'learning_rate': [0.05, 0.1, 0.20, 0.3],
-        'min_child_weight': [1, 5, 10, 20, 100]
-    }
-    challenge_cost = make_scorer(ohh_compute_cost, greater_is_better=False)
-    xgb_classifier = xgb.XGBClassifier(eval_metric=challenge_cost)
-    random_search = RandomizedSearchCV(xgb_classifier, param_distributions=hyperparameter_grid, n_iter= 5 if ALGORITHM_HPS[RUN_TEST_lbl] else 100, scoring=challenge_cost, n_jobs=4, cv=None, verbose=3, random_state=42)
-    random_search.fit(np.concatenate([train_input_X, val_input_X]), np.concatenate([train_input_y, val_input_y]))
-    test_prob = random_search.best_estimator_.predict(test_input_X)
-    test_cost = ohh_compute_cost(test_prob, test_input_y)
-    logger.info("Expected Outcome Cost: {}".format(test_cost))
+    train_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1))).batch(min(len(embs_train), len(embs_val), ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl]), drop_remainder=True)
+    val_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(val_input_X), val_input_y.reshape(-1,1))).batch(min(len(embs_train), len(embs_val), ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl]), drop_remainder=True)
+    test_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(test_input_X), test_input_y.reshape(-1,1))).batch(1)
+    outcome_model_new = get_outcome_decision_model()
+    outcome_model_new.fit(train_outcome, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_outcome, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+                    monitor="val_auc",
+                    min_delta=0,
+                    patience=20 * runs,
+                    verbose=0,
+                    mode="max",
+                    baseline=None,
+                    restore_best_weights=True
+                )], workers=WORKERS)   
+    logger.info("Murmur Detection Model Classification Report")
+    decision_evaluation = outcome_model_new.evaluate(test_outcome, return_dict=True) 
+    logger.info("Find best threshold...")
+    #XGBoost
+    # hyperparameter_grid = {
+    #     'n_estimators': [100, 400, 800],
+    #     'max_depth': [3, 6, 9, 15],
+    #     'gamma' : [1, 2, 3, 5, 9],
+    #     'reg_alpha' : [10, 20, 40, 60, 150],
+    #     'learning_rate': [0.05, 0.1, 0.20, 0.3],
+    #     'min_child_weight': [1, 5, 10, 20, 100]
+    # }
+    # challenge_cost = make_scorer(ohh_compute_cost, greater_is_better=False)
+    # xgb_classifier = xgb.XGBClassifier(eval_metric=challenge_cost)
+    # random_search = RandomizedSearchCV(xgb_classifier, param_distributions=hyperparameter_grid, n_iter= 5 if ALGORITHM_HPS[RUN_TEST_lbl] else 100, scoring=challenge_cost, n_jobs=4, cv=None, verbose=3, random_state=42)
+    # random_search.fit(np.concatenate([train_input_X, val_input_X]), np.concatenate([train_input_y, val_input_y]))
+    # test_prob = random_search.best_estimator_.predict(test_input_X)
+    # test_cost = ohh_compute_cost(test_prob, test_input_y)
+    # logger.info("Expected Outcome Cost: {}".format(test_cost))
+    
+    
     
     
     # train_outcome_df_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1)))
@@ -1791,7 +1819,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # murmur_outcome_new.fit(train_outcome_df, validation_data=val_outcome_df)
     
     # # Save the model.
-    save_challenge_model(model_folder, noise_model_new, murmur_model_new, murmur_decision_new, random_search.best_estimator_, weight_mean, height_mean, age_mode, gender_mode, patient_means, patient_stds)
+    save_challenge_model(model_folder, noise_model_new, murmur_model_new, murmur_decision_new, outcome_model_new, weight_mean, height_mean, age_mode, gender_mode, patient_means, patient_stds)
     tf.keras.backend.clear_session()
     # clean_current_path()
     if verbose >= 1:
@@ -1803,8 +1831,10 @@ def load_challenge_model(model_folder, verbose):
     noise_model = load_model(os.path.join(model_folder, 'noise_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_model = load_model(os.path.join(model_folder, 'murmur_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_decision_model = load_model(os.path.join(model_folder, 'murmur_decision_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-    outcome_model = xgb.Booster()
-    outcome_model.load_model(os.path.join(model_folder, "outcome_model.json"))
+    outcome_model = load_model(os.path.join(model_folder, 'outcome_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy, "ohh_compute_cost_tf": ohh_compute_cost_tf })
+    # outcome_model = xgb.Booster()
+    # outcome_model.load_model(os.path.join(model_folder, "outcome_model.json"))
+    
     models_info = pd.read_pickle(os.path.join(model_folder,"models_info.pickle"))
     models_info = models_info.to_dict()
     models_info["noise_model"] = noise_model
@@ -1954,6 +1984,8 @@ def run_challenge_model(model, data, recordings, verbose):
     patient_info = np.concatenate([patient_demographics[demographics[:-3]].values, age_dummified])
     patient_info = (patient_info - model["patient_means"].values) /  model["patient_stds"].values
     patient_outcome_X = np.concatenate([patient_info, embs_df.values.flatten()])
+    import ipdb;ipdb.set_trace()
+    pass
     outcome_proba = model['outcome_model'].predict(xgb.core.DMatrix(patient_outcome_X.reshape(1, -1)))[0]
     
     outcome_probabilities = np.array([outcome_proba, 1 - outcome_proba])
@@ -2008,9 +2040,10 @@ def run_challenge_model(model, data, recordings, verbose):
 
 # Save your trained model.
 def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decision_model, outcome_model, weight_mean, height_mean, age_mode, gender_mode, patient_means, patient_stds):
+    
     noise_model.save(os.path.join(model_folder, "noise_model.h5"))
     murmur_model.save(os.path.join(model_folder, "murmur_model.h5"))
-    outcome_model.save_model(os.path.join(model_folder, "outcome_model.json"))
+    outcome_model.save(os.path.join(model_folder, "outcome_model.h5"))
     murmur_decision_model.save(os.path.join(model_folder, "murmur_decision_model.h5"))
     pd.Series({
         EMBDS_PER_PATIENTS_lbl : ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],
@@ -2043,6 +2076,21 @@ def get_murmur_decision_model_pretrained(murmur_model):
     pass
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid", kernel_initializer=generate_kernel_initialization()))
     murmur_decision_new = tf.keras.Sequential(model_layers)
+    return murmur_decision_new
+
+def get_outcome_decision_model():
+    input_layer = tf.keras.layers.InputLayer(input_shape=(len(demographics) + ALGORITHM_HPS[EMBS_SIZE_lbl] * ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],))
+    layer_1 = CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True})
+    # layer_dense = tf.keras.layers.Dense(8, activation="re_lu"),
+    # layer_dropout = tf.keras.layers.Dropout(0.5, seed=42),
+    model_layers = [input_layer, layer_1]
+    for _ in range(ALGORITHM_HPS[N_DECISION_LAYERS_lbl]):
+        model_layers.append(tf.keras.layers.Dense(ALGORITHM_HPS[NEURONS_DECISION_lbl], activation="relu", kernel_initializer=generate_kernel_initialization()))
+        if ALGORITHM_HPS[IS_DROPOUT_IN_DECISION_lbl]:
+            model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
+    model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid", kernel_initializer=generate_kernel_initialization()))
+    murmur_decision_new = tf.keras.Sequential(model_layers)
+    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_DECISION_lbl],'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=[ohh_compute_cost_tf] + get_all_metrics())
     return murmur_decision_new
 
 def get_murmur_decision_model():

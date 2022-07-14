@@ -304,12 +304,14 @@ if ALGORITHM_HPS[RUN_TEST_lbl]:
     MURMUR_EPOCHS = 1
     NOISE_EPOCHS = 1
     MURMUR_DECISION_EPOCHS = 1
+    OUTCOME_DECISION_EPOCHS = 100
     MAX_TRIALS = 1
 else:
     logger.info("Running full")
     MURMUR_EPOCHS = 1000
     NOISE_EPOCHS = 1000
-    MURMUR_DECISION_EPOCHS = 500
+    MURMUR_DECISION_EPOCHS = 1000
+    OUTCOME_DECISION_EPOCHS = 1000
     MAX_TRIALS = 100
 
 #Download autoencoder
@@ -1416,188 +1418,187 @@ def train_challenge_model(data_folder, model_folder, verbose):
     sklearn_weights_murmur = {0 :1, 1:1}
     sklearn_weights_murmur[1] *= ALGORITHM_HPS[class_weight_murmur_lbl]
     
-    
-    if ALGORITHM_HPS[FINAL_TRAINING_lbl]:
-        murmur_model_dataset_train = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val)
-        murmur_murmur_dataset_val = murmur_murmur_dataset_test
-    
-    if ALGORITHM_HPS[RUN_AUTOKERAS_MURMUR_lbl]:
-        input_node = ak.ImageInput()
-        output_node = ak.XceptionBlock(pretrained=False)(input_node)
-        output_node = ak.SpatialReduction(reduction_type="flatten")(output_node)
-        output_node = ak.DenseBlock(num_layers=1, num_units=64, dropout=0)(output_node)
-        output_node = ak.ClassificationHead(num_classes = 2, dropout=0)(output_node)
-
-        clf = OHHAutoModel(
-            inputs=input_node, tuner="bayesian", seed=42, objective=kt.Objective("val_auc", direction="max"), outputs=output_node, overwrite=True, 
-            max_trials=MAX_TRIALS, metrics = get_all_metrics())
-        clf.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, epochs = MURMUR_EPOCHS, class_weight = sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
-            monitor="val_auc",
-            min_delta=0,
-            patience=20,
-            verbose=0,
-            mode="max",
-            baseline=None,
-            restore_best_weights=True
-        )], workers= WORKERS)
-        murmur_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-  
-    else:
-        if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
-            murmur_model_new = get_murmur_model()
-            
-        else:
-            murmur_model_new = tf.keras.models.clone_model(noise_model_new)
-            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+    # I have this while because for some random reason, the model does not converge. So, I keep increasing the patience untill it get out of local minima
+    converged = False
+    runs = 1
+    while not converged:
+        logger.warning("Run: {}".format(runs))
         
-        murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
-                             epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
-            monitor="val_auc",
-            min_delta=0,
-            patience=20,
-            verbose=0,
-            mode="max",
-            baseline=None,
-            restore_best_weights=True
-        )], workers= WORKERS)
-    # murmur_model_new.set_weights(noise_model_new.get_weights())
-    logger.info("Murmur Model Performance")
-    logger.info(pprint.pformat(murmur_model_new.evaluate(murmur_murmur_dataset_test, return_dict=True)))
-    tf.keras.models.save_model(
-            murmur_model_new,
-            os.path.join(model_folder, 'murmur_model.tf'),
-            overwrite=True,
-            include_optimizer=True,
-            save_format="tf",
-            signatures=None,
-            options=None,
-            save_traces=True
-        )
-    
-    murmur_embedding_model = tf.keras.models.Sequential(murmur_model_new.layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
-    
-    # Generating embeddings
-    logger.info("Loading all images...")
-    murmur_model_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]), shuffle=False)
-    train_filepaths = murmur_model_dataset_train.file_paths
-    murmur_model_dataset_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-    murmur_model_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl],ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]) , shuffle=False )
-    val_filepaths = murmur_model_dataset_val.file_paths
-    murmur_model_dataset_val.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-    murmur_model_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]), shuffle=False )
-    test_filepaths = murmur_model_dataset_test.file_paths
-    murmur_model_dataset_test.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-    # murmur_model_dataset_all = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val).concatenate(murmur_murmur_dataset_test)
-    # all_murmur_files_series = pd.Series(glob.glob(os.path.join(train_folder_murmur, "**/*.png")) + glob.glob(os.path.join(val_folder_murmur, "**/*.png")) + glob.glob(os.path.join(test_folder_murmur, "**/*.png")))
-    # all_murmur_files_images = all_murmur_files_series.apply(load_image_array)
-    logger.info("Predicting for all images...")
-    all_file_paths = pd.Series(train_filepaths + val_filepaths + test_filepaths)
-    all_murmur_files_embs = np.vstack((murmur_embedding_model.predict(murmur_model_dataset_train), murmur_embedding_model.predict(murmur_model_dataset_val), murmur_embedding_model.predict(murmur_model_dataset_test)))
-    # del all_murmur_files_images
-    patient_ids = all_file_paths.apply(lambda x: x.split("/")[2].split("_")[0])
-    embs_df = pd.DataFrame({"filepath"  : all_file_paths, "embs" : all_murmur_files_embs.tolist(), "patient_id": patient_ids})
-    
-    embs_train = []
-    embs_label_train = []
-    embs_patient_id_train = []
-    embs_val = []
-    embs_label_val = []
-    embs_patient_id_val = []
-    embs_test = []
-    embs_label_test = []
-    embs_patient_id_test = []
-    logger.info("Separeting sets for murmur decision...")
-    for patient_id, patient_embs in tqdm(embs_df.groupby("patient_id")):
-        patient_row = patient_split_df[patient_split_df["patient_id"] == patient_id].iloc[0]
-        embs_df = patient_embs["embs"].sample(frac=1, random_state=42)
-        label = patient_row["label"] == "positive"
-        # We lose potential embds here, fix later
-        if patient_row["split"] == "train":
-            for repetition in range(ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl]):
-                embs_df = embs_df.sample(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl], replace=True, random_state=42 + repetition)
-                embs_train.append(np.vstack(embs_df).flatten())
-                embs_label_train.append(label)
-                embs_patient_id_train.append(patient_id)
-        # We losing info in the validation
-        if embs_df.shape[0] < ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]:
-            embs_df = embs_df.sample(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl], replace=True, random_state=42)
-        else:
-            embs_df = embs_df.head(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl])
-        if patient_row["split"] == "val":
-            embs_val.append(np.vstack(embs_df).flatten())
-            embs_label_val.append(label)
-            embs_patient_id_val.append(patient_id)
-        if patient_row["split"] == "test":
-            embs_test.append(np.vstack(embs_df).flatten())
-            embs_label_test.append(label)
-            embs_patient_id_test.append(patient_id)
+        if ALGORITHM_HPS[FINAL_TRAINING_lbl]:
+            murmur_model_dataset_train = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val)
+            murmur_murmur_dataset_val = murmur_murmur_dataset_test
         
-    # generate_patient_embeddings_folder_v2(patient_id, patient_row["split"], patient_row["label"], patient_embs["embs"])
-    # embs_train, labels_train = load_embs_labels(train_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
-    # embs_val, labels_val = load_embs_labels(val_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
-    logger.info("Loading sets for murmur decision...")
-    #TODO: Shuffle embs_train WITH LABELS. Than BATCH!
-    temp = list(zip(embs_train, embs_label_train))
-    random.shuffle(temp)
-    embs_train, embs_label_train = zip(*temp)
-    
-    temp = list(zip(embs_val, embs_label_val))
-    random.shuffle(temp)
-    embs_val, embs_label_val = zip(*temp)
-    
-    temp = list(zip(embs_test, embs_label_test))
-    random.shuffle(temp)
-    embs_test, embs_label_test = zip(*temp)
-    
-    
-    train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), list(embs_label_train))).batch(min(len(embs_train), len(embs_val), ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl]), drop_remainder=True)
-    val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), list(embs_label_val))).batch(min(len(embs_train), len(embs_val), ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl]))
-    test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), list(embs_label_test))).batch(1)
+        if ALGORITHM_HPS[RUN_AUTOKERAS_MURMUR_lbl]:
+            input_node = ak.ImageInput()
+            output_node = ak.XceptionBlock(pretrained=False)(input_node)
+            output_node = ak.SpatialReduction(reduction_type="flatten")(output_node)
+            output_node = ak.DenseBlock(num_layers=1, num_units=64, dropout=0)(output_node)
+            output_node = ak.ClassificationHead(num_classes = 2, dropout=0)(output_node)
 
-    sklearn_weights_decision = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.vstack(train_decision_dataset.map(lambda x,y: y)).flatten().tolist())
-    sklearn_weights_decision = dict(enumerate(sklearn_weights_decision))
-    sklearn_weights_decision[1] *= ALGORITHM_HPS[class_weight_decision_lbl]
-    
-    
-    if ALGORITHM_HPS[FINAL_TRAINING_lbl]:
-        train_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
-        val_decision_dataset = test_decision_dataset
-    
-    if ALGORITHM_HPS[RUN_AUTOKERAS_DECISION_lbl]:
-        input = ak.Input(name=None)
-        output_node = ak.DenseBlock(num_layers=None, num_units=None, dropout=None)(input)
-        output_node = ak.ClassificationHead(dropout=0)(output_node)
-        clf = ak.AutoModel(
-            input,
-            output_node,
-            project_name="auto_model",
-            max_trials=MAX_TRIALS,
-            directory=None,
-            tuner="bayesian",
-            overwrite=True,
-            seed=42,
-            objective = kt.Objective("val_auc", direction="max"),
-            max_model_size=None, 
-            metrics = get_all_metrics()
-        )
-        clf.fit(train_decision_dataset, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+            clf = OHHAutoModel(
+                inputs=input_node, tuner="bayesian", seed=42, objective=kt.Objective("val_auc", direction="max"), outputs=output_node, overwrite=True, 
+                max_trials=MAX_TRIALS, metrics = get_all_metrics())
+            clf.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, epochs = MURMUR_EPOCHS, class_weight = sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_auc",
                 min_delta=0,
-                patience=10,
+                patience=20,
                 verbose=0,
                 mode="max",
                 baseline=None,
                 restore_best_weights=True
             )], workers= WORKERS)
-        murmur_decision_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-        
-    else:        
-        # I have this while because for some random reason, the model does not converge. So, I keep increasing the patience untill it get out of local minima
-        converged = False
-        runs = 1
-        while not converged:
-            logger.warning("Run: {}".format(runs))
+            murmur_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+    
+        else:
+            if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
+                murmur_model_new = get_murmur_model()
+                
+            else:
+                murmur_model_new = tf.keras.models.clone_model(noise_model_new)
+                murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
             
+            murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
+                                epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
+                monitor="val_auc",
+                min_delta=0,
+                patience=20,
+                verbose=0,
+                mode="max",
+                baseline=None,
+                restore_best_weights=True
+            )], workers= WORKERS)
+        # murmur_model_new.set_weights(noise_model_new.get_weights())
+        logger.info("Murmur Model Performance")
+        logger.info(pprint.pformat(murmur_model_new.evaluate(murmur_murmur_dataset_test, return_dict=True)))
+        tf.keras.models.save_model(
+                murmur_model_new,
+                os.path.join(model_folder, 'murmur_model.tf'),
+                overwrite=True,
+                include_optimizer=True,
+                save_format="tf",
+                signatures=None,
+                options=None,
+                save_traces=True
+            )
+        
+        murmur_embedding_model = tf.keras.models.Sequential(murmur_model_new.layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
+        
+        # Generating embeddings
+        logger.info("Loading all images...")
+        murmur_model_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]), shuffle=False)
+        train_filepaths = murmur_model_dataset_train.file_paths
+        murmur_model_dataset_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        murmur_model_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl],ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]) , shuffle=False )
+        val_filepaths = murmur_model_dataset_val.file_paths
+        murmur_model_dataset_val.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        murmur_model_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]), shuffle=False )
+        test_filepaths = murmur_model_dataset_test.file_paths
+        murmur_model_dataset_test.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        # murmur_model_dataset_all = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val).concatenate(murmur_murmur_dataset_test)
+        # all_murmur_files_series = pd.Series(glob.glob(os.path.join(train_folder_murmur, "**/*.png")) + glob.glob(os.path.join(val_folder_murmur, "**/*.png")) + glob.glob(os.path.join(test_folder_murmur, "**/*.png")))
+        # all_murmur_files_images = all_murmur_files_series.apply(load_image_array)
+        logger.info("Predicting for all images...")
+        all_file_paths = pd.Series(train_filepaths + val_filepaths + test_filepaths)
+        all_murmur_files_embs = np.vstack((murmur_embedding_model.predict(murmur_model_dataset_train), murmur_embedding_model.predict(murmur_model_dataset_val), murmur_embedding_model.predict(murmur_model_dataset_test)))
+        # del all_murmur_files_images
+        patient_ids = all_file_paths.apply(lambda x: x.split("/")[2].split("_")[0])
+        embs_df = pd.DataFrame({"filepath"  : all_file_paths, "embs" : all_murmur_files_embs.tolist(), "patient_id": patient_ids})
+        
+        embs_train = []
+        embs_label_train = []
+        embs_patient_id_train = []
+        embs_val = []
+        embs_label_val = []
+        embs_patient_id_val = []
+        embs_test = []
+        embs_label_test = []
+        embs_patient_id_test = []
+        logger.info("Separeting sets for murmur decision...")
+        for patient_id, patient_embs in tqdm(embs_df.groupby("patient_id")):
+            patient_row = patient_split_df[patient_split_df["patient_id"] == patient_id].iloc[0]
+            patient_embs_df = patient_embs["embs"].sample(frac=1, random_state=42)
+            label = patient_row["label"] == "positive"
+            # We lose potential embds here, fix later
+            if patient_row["split"] == "train":
+                for repetition in range(ALGORITHM_HPS[RESHUFFLE_PATIENT_EMBS_N_lbl]):
+                    patient_embs_df = patient_embs_df.sample(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl], replace=True, random_state=42 + repetition)
+                    embs_train.append(np.vstack(patient_embs_df).flatten())
+                    embs_label_train.append(label)
+                    embs_patient_id_train.append(patient_id)
+            # We losing info in the validation
+            if patient_embs_df.shape[0] < ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]:
+                patient_embs_df = patient_embs_df.sample(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl], replace=True, random_state=42)
+            else:
+                patient_embs_df = patient_embs_df.head(ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl])
+            if patient_row["split"] == "val":
+                embs_val.append(np.vstack(patient_embs_df).flatten())
+                embs_label_val.append(label)
+                embs_patient_id_val.append(patient_id)
+            if patient_row["split"] == "test":
+                embs_test.append(np.vstack(patient_embs_df).flatten())
+                embs_label_test.append(label)
+                embs_patient_id_test.append(patient_id)
+            
+        # generate_patient_embeddings_folder_v2(patient_id, patient_row["split"], patient_row["label"], patient_embs["embs"])
+        # embs_train, labels_train = load_embs_labels(train_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
+        # embs_val, labels_val = load_embs_labels(val_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
+        logger.info("Loading sets for murmur decision...")
+        #TODO: Shuffle embs_train WITH LABELS. Than BATCH!
+        temp = list(zip(embs_train, embs_label_train))
+        random.shuffle(temp)
+        embs_train, embs_label_train = zip(*temp)
+        
+        temp = list(zip(embs_val, embs_label_val))
+        random.shuffle(temp)
+        embs_val, embs_label_val = zip(*temp)
+        
+        temp = list(zip(embs_test, embs_label_test))
+        random.shuffle(temp)
+        embs_test, embs_label_test = zip(*temp)
+        
+        
+        train_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_train), list(embs_label_train))).batch(min(len(embs_train), len(embs_val), ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl]), drop_remainder=True)
+        val_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_val), list(embs_label_val))).batch(min(len(embs_train), len(embs_val), ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl]))
+        test_decision_dataset = tf.data.Dataset.from_tensor_slices((np.vstack(embs_test), list(embs_label_test))).batch(1)
+
+        sklearn_weights_decision = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.vstack(train_decision_dataset.map(lambda x,y: y)).flatten().tolist())
+        sklearn_weights_decision = dict(enumerate(sklearn_weights_decision))
+        sklearn_weights_decision[1] *= ALGORITHM_HPS[class_weight_decision_lbl]
+        
+        
+        if ALGORITHM_HPS[FINAL_TRAINING_lbl]:
+            train_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
+            val_decision_dataset = test_decision_dataset
+        
+        if ALGORITHM_HPS[RUN_AUTOKERAS_DECISION_lbl]:
+            input = ak.Input(name=None)
+            output_node = ak.DenseBlock(num_layers=None, num_units=None, dropout=None)(input)
+            output_node = ak.ClassificationHead(dropout=0)(output_node)
+            clf = ak.AutoModel(
+                input,
+                output_node,
+                project_name="auto_model",
+                max_trials=MAX_TRIALS,
+                directory=None,
+                tuner="bayesian",
+                overwrite=True,
+                seed=42,
+                objective = kt.Objective("val_auc", direction="max"),
+                max_model_size=None, 
+                metrics = get_all_metrics()
+            )
+            clf.fit(train_decision_dataset, validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+                    monitor="val_auc",
+                    min_delta=0,
+                    patience=10,
+                    verbose=0,
+                    mode="max",
+                    baseline=None,
+                    restore_best_weights=True
+                )], workers= WORKERS)
+            murmur_decision_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
+            
+        else:        
             if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
                 murmur_decision_new = get_murmur_decision_model() 
                 # murmur_decision_new = get_murmur_decision_model_pretrained(murmur_model_new) 
@@ -1607,74 +1608,74 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 murmur_decision_new = Functional.from_config(murmur_decision_config) 
                 murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
             
-            murmur_decision_new.fit(train_decision_dataset, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
-                    monitor="val_auc",
-                    min_delta=0,
-                    patience=20 * runs,
-                    verbose=0,
-                    mode="max",
-                    baseline=None,
-                    restore_best_weights=True
-                )], workers=WORKERS)
+        murmur_decision_new.fit(train_decision_dataset, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+                monitor="val_auc",
+                min_delta=0,
+                patience=20 * runs,
+                verbose=0,
+                mode="max",
+                baseline=None,
+                restore_best_weights=True
+            )], workers=WORKERS)
+        
+        logger.info("Murmur Detection Model Classification Report")
+        decision_evaluation = murmur_decision_new.evaluate(test_decision_dataset, return_dict=True) 
+        logger.info("Find best threshold...")
+        
+        #Fuse train and test to choose decision thresholds? Doing this in faith since val has low number of samples.
+        test_predictions_proba = murmur_decision_new.predict(np.vstack(embs_train + embs_val + embs_test))
+        test_labels_original = np.array([*embs_label_train] + [*embs_label_val] + [*embs_label_test]).reshape(-1,1)
+        
+        # test_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
+        
+        # test_predictions_proba = murmur_decision_new.predict(test_decision_dataset)
+        cwa_thresholds = []
+        for threshold in np.arange(0,1,0.01):
+            test_labels = test_labels_original.copy()
+            test_predictions = (test_predictions_proba > threshold)
+            test_predictions = enc.transform(test_predictions).toarray()
+            # test_labels = np.vstack(test_decision_dataset.map(lambda x, y: y))
+            test_labels = enc.transform(test_labels).toarray()
+            tn, fp, fn, tp =  confusion_matrix(enc.inverse_transform(test_labels).flatten(), enc.inverse_transform(test_predictions).flatten(), labels=[False, True]).flatten()
+            all_positive = tp+fn
+            all_negative = tn+fp
+            if all_positive == 0 or all_negative == 0 or tn == 0:
+                continue
+            ohh_metric = (tp / all_positive) / (tn / all_negative)
+            if  (tp / (tp + fn)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl] or (tn / (tn + fp)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl]:
+                continue
             
-            logger.info("Murmur Detection Model Classification Report")
-            decision_evaluation = murmur_decision_new.evaluate(test_decision_dataset, return_dict=True) 
-            logger.info("Find best threshold...")
-            
-            #Fuse train and test to choose decision thresholds? Doing this in faith since val has low number of samples.
-            test_predictions_proba = murmur_decision_new.predict(np.vstack(embs_train + embs_val + embs_test))
-            test_labels_original = np.array([*embs_label_train] + [*embs_label_val] + [*embs_label_test]).reshape(-1,1)
-            
-            # test_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
-            
-            # test_predictions_proba = murmur_decision_new.predict(test_decision_dataset)
-            cwa_thresholds = []
-            for threshold in np.arange(0,1,0.01):
-                test_labels = test_labels_original.copy()
-                test_predictions = (test_predictions_proba > threshold)
-                test_predictions = enc.transform(test_predictions).toarray()
-                # test_labels = np.vstack(test_decision_dataset.map(lambda x, y: y))
-                test_labels = enc.transform(test_labels).toarray()
-                tn, fp, fn, tp =  confusion_matrix(enc.inverse_transform(test_labels).flatten(), enc.inverse_transform(test_predictions).flatten(), labels=[False, True]).flatten()
-                all_positive = tp+fn
-                all_negative = tn+fp
-                if all_positive == 0 or all_negative == 0 or tn == 0:
-                    continue
-                ohh_metric = (tp / all_positive) / (tn / all_negative)
-                if  (tp / (tp + fn)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl] or (tn / (tn + fp)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl]:
-                    continue
-                
-                cwa = cwa_fn(test_labels, test_predictions, classes = ["Abnormal", "Normal"])
-                cwa_thresholds.append({
-                    "cwa" : cwa,
-                    "thresholds" : threshold,
-                    "ohh_metric" : ohh_metric,
-                    "sensitivity" : tp / (tp + fn),
-                    "specificity" : tn / (tn + fp)
-                })
-            thresholds_df = pd.DataFrame(cwa_thresholds)
-            if thresholds_df.shape[0] > 0:
-                thresholds_df = thresholds_df.set_index("thresholds")
-                thresholds_df.plot()
-                plt.savefig("thresholds.png")
-                if thresholds_df.shape[0] > 5:
-                    y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
-                    x = thresholds_df.index.values
-                    kn = KneeLocator(x, y, curve='convex', direction='decreasing')
-                    ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee
-                else:
-                    ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
-                logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
-                converged = True
+            cwa = cwa_fn(test_labels, test_predictions, classes = ["Abnormal", "Normal"])
+            cwa_thresholds.append({
+                "cwa" : cwa,
+                "thresholds" : threshold,
+                "ohh_metric" : ohh_metric,
+                "sensitivity" : tp / (tp + fn),
+                "specificity" : tn / (tn + fp)
+            })
+        thresholds_df = pd.DataFrame(cwa_thresholds)
+        if thresholds_df.shape[0] > 0:
+            thresholds_df = thresholds_df.set_index("thresholds")
+            thresholds_df.plot()
+            plt.savefig("thresholds.png")
+            if thresholds_df.shape[0] > 5:
+                y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
+                x = thresholds_df.index.values
+                kn = KneeLocator(x, y, curve='convex', direction='decreasing')
+                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee
             else:
-                logger.error("THRESHOLD NOT CHANGED!")
-                if ALGORITHM_HPS[RUN_TEST_lbl]:
-                    converged = True
-                if runs == 50:
-                    raise Exception("THRESHOLD NOT CHANGED!")
-                runs += 1
-                tf.keras.utils.set_random_seed(ORIGINAL_SEED + runs)
-                tf.keras.backend.clear_session()
+                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
+            logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
+            converged = True
+        else:
+            logger.error("THRESHOLD NOT CHANGED!")
+            if ALGORITHM_HPS[RUN_TEST_lbl]:
+                converged = True
+            if runs == 50:
+                raise Exception("THRESHOLD NOT CHANGED!")
+            runs += 1
+            tf.keras.utils.set_random_seed(ORIGINAL_SEED + runs)
+            tf.keras.backend.clear_session()
                 
         logger.info("Final threshold: {}".format(ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl]))
         logger.info(pprint.pformat(decision_evaluation))
@@ -1726,6 +1727,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     patients_file_informations_df["pregnancy_status"] = patients_file_informations_df["pregnancy_status"].astype(float)
     age_dummified = pd.DataFrame.from_records(patients_file_informations_df["age"].apply(lambda x: x == age_encoding), columns = age_encoding).astype(int)
     patients_file_informations_df = pd.concat([patients_file_informations_df, age_dummified], axis=1)
+    patients_file_informations_df = patients_file_informations_df.drop_duplicates(subset=["patient_id"])
     # demographics = ["pregnancy_status", "weight", "height", "sex", "bmi"] +  patients_file_informations_df["age"].unique().tolist()
     patients_file_informations_values_df = patients_file_informations_df[demographics]
     patient_means = patients_file_informations_values_df.mean()
@@ -1733,7 +1735,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
     patients_file_informations_values_df = (patients_file_informations_values_df - patient_means) / patient_stds
     patients_file_informations_df[demographics] = patients_file_informations_values_df[demographics].values
     patients_file_informations_df["patient_id"] = patients_file_informations_df["file_prefix"].apply(lambda x: x.split("_")[0])
-    patients_file_informations_df = patients_file_informations_df.drop_duplicates(subset=["patient_id"])
+    # Why remove duplicates?
+     
     embs_patient_id_df = pd.DataFrame(zip([*embs_train] + [*embs_val] + [*embs_test], embs_patient_id_train + embs_patient_id_val + embs_patient_id_test), columns=["embs", "patient_id"])
     
     #Prepare input dataset
@@ -1762,7 +1765,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     val_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(val_input_X), val_input_y.reshape(-1,1))).batch(min(len(embs_train), len(embs_val), ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl]), drop_remainder=True)
     test_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(test_input_X), test_input_y.reshape(-1,1))).batch(1)
     outcome_model_new = get_outcome_decision_model()
-    outcome_model_new.fit(train_outcome, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_outcome, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
+    outcome_model_new.fit(train_outcome, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_outcome, epochs = OUTCOME_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                     monitor="val_auc",
                     min_delta=0,
                     patience=20 * runs,
@@ -1771,7 +1774,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     baseline=None,
                     restore_best_weights=True
                 )], workers=WORKERS)   
-    logger.info("Murmur Detection Model Classification Report")
+    logger.info("Outcome Detection Model Classification Report")
     decision_evaluation = outcome_model_new.evaluate(test_outcome, return_dict=True) 
     logger.info("Find best threshold...")
     #XGBoost
@@ -1983,7 +1986,7 @@ def run_challenge_model(model, data, recordings, verbose):
     
     patient_info = np.concatenate([patient_demographics[demographics[:-3]].values, age_dummified])
     patient_info = (patient_info - model["patient_means"].values) /  model["patient_stds"].values
-    patient_outcome_X = np.concatenate([patient_info, embs_df.values.flatten()])
+    patient_outcome_X = np.concatenate([embs_df.values.flatten(), patient_info ])
     outcome_proba = model['outcome_model'].predict(patient_outcome_X.reshape(1, -1).astype(float32))[0][0]
     
     outcome_probabilities = np.array([outcome_proba, 1 - outcome_proba])

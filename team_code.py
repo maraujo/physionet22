@@ -165,6 +165,7 @@ RESHUFFLE_PATIENT_EMBS_N_lbl = "RESHUFFLE_PATIENT_EMBS_N"
 MURMUR_IMAGE_SIZE_lbl = "MURMUR_IMAGE_SIZE"
 class_weight_murmur_lbl = "class_weight_murmur"
 class_weight_decision_lbl = "class_weight_decision"
+class_weight_outcome_lbl = "class_weight_outcome"
 batch_size_murmur_lbl = "batch_size_murmur"
 EMBS_SIZE_lbl = "EMBS_SIZE"
 CNN_MURMUR_MODEL_lbl = "CNN_MURMUR_MODEL"
@@ -206,6 +207,7 @@ ALGORITHM_HPS = {
     EMBDS_PER_PATIENTS_lbl : 50,
     class_weight_murmur_lbl : 5,
     class_weight_decision_lbl : 5,
+    class_weight_outcome_lbl : 5,
     TRAIN_FRAC_lbl : 0.8,
     IMG_HEIGHT_RATIO_lbl : 1,
     STEPS_PER_EPOCH_DECISION_lbl : None,
@@ -304,7 +306,7 @@ if ALGORITHM_HPS[RUN_TEST_lbl]:
     MURMUR_EPOCHS = 1
     NOISE_EPOCHS = 1
     MURMUR_DECISION_EPOCHS = 1
-    OUTCOME_DECISION_EPOCHS = 100
+    OUTCOME_DECISION_EPOCHS = 1
     MAX_TRIALS = 1
 else:
     logger.info("Running full")
@@ -1671,7 +1673,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             logger.error("THRESHOLD NOT CHANGED!")
             if ALGORITHM_HPS[RUN_TEST_lbl]:
                 converged = True
-            if runs == 50:
+            if runs == 5:
                 raise Exception("THRESHOLD NOT CHANGED!")
             runs += 1
             tf.keras.utils.set_random_seed(ORIGINAL_SEED + runs)
@@ -1702,7 +1704,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
             tf.summary.scalar("auc", decision_evaluation["auc"], step=1)
             tf.summary.scalar("auc_roc", decision_evaluation["auc_roc"], step=1)
             tf.summary.scalar("compute_weighted_accuracy", decision_evaluation["compute_weighted_accuracy"], step=1)
-        
+    
+    logger.info("Out of the while...")
     tf.keras.models.save_model(
                 murmur_decision_new,
                 os.path.join(model_folder, 'murmur_decision.tf'),
@@ -1738,11 +1741,15 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # Why remove duplicates?
      
     embs_patient_id_df = pd.DataFrame(zip([*embs_train] + [*embs_val] + [*embs_test], embs_patient_id_train + embs_patient_id_val + embs_patient_id_test), columns=["embs", "patient_id"])
-    
+    embs_patient_id_df = embs_patient_id_df.drop_duplicates(subset=["patient_id"])
+    embs_patient_id_df["pred"] = murmur_decision_new.predict(np.vstack(embs_patient_id_df["embs"])).flatten()
+    embs_patient_id_df = embs_patient_id_df.drop("embs",axis=1)
     #Prepare input dataset
     patients_file_informations_df = patients_file_informations_df.merge(embs_patient_id_df, left_on="patient_id", right_on="patient_id")
-    inputs_features = demographics + ["embs"] 
-    input_X = pd.concat([pd.DataFrame(np.vstack(patients_file_informations_df["embs"].values)), patients_file_informations_df[[*filter(lambda x: x != "embs", inputs_features)]]], axis=1)
+    inputs_features = demographics + ["pred"] 
+    # When using embs
+    # input_X = pd.concat([pd.DataFrame(np.vstack(patients_file_informations_df["embs"].values)), patients_file_informations_df[[*filter(lambda x: x != "embs", inputs_features)]]], axis=1)
+    input_X = patients_file_informations_df[inputs_features]
     input_y = (patients_file_informations_df["outcome"] == "Abnormal").astype(int)
     train_idx = patients_file_informations_df[patients_file_informations_df["split"] == "train"].index
     val_idx = patients_file_informations_df[patients_file_informations_df["split"] == "val"].index
@@ -1764,11 +1771,17 @@ def train_challenge_model(data_folder, model_folder, verbose):
     train_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1))).batch(min(len(embs_train), len(embs_val), ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl]), drop_remainder=True)
     val_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(val_input_X), val_input_y.reshape(-1,1))).batch(min(len(embs_train), len(embs_val), ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl]), drop_remainder=True)
     test_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(test_input_X), test_input_y.reshape(-1,1))).batch(1)
+    sklearn_weights_outcome_decision = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.vstack(train_outcome.map(lambda x,y: y)).flatten().tolist())
+    sklearn_weights_outcome_decision = dict(enumerate(sklearn_weights_decision))
+    sklearn_weights_outcome_decision[1] *= ALGORITHM_HPS[class_weight_outcome_lbl]
+    
+    
     outcome_model_new = get_outcome_decision_model()
-    outcome_model_new.fit(train_outcome, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_outcome, epochs = OUTCOME_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
-                    monitor="val_auc",
+    outcome_class_weight = sklearn_weights_outcome_decision
+    outcome_model_new.fit(train_outcome, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_outcome, epochs = OUTCOME_DECISION_EPOCHS, class_weight=outcome_class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
+                    monitor="val_loss",
                     min_delta=0,
-                    patience=20 * runs,
+                    patience=20,
                     verbose=0,
                     mode="max",
                     baseline=None,
@@ -1986,7 +1999,9 @@ def run_challenge_model(model, data, recordings, verbose):
     
     patient_info = np.concatenate([patient_demographics[demographics[:-3]].values, age_dummified])
     patient_info = (patient_info - model["patient_means"].values) /  model["patient_stds"].values
-    patient_outcome_X = np.concatenate([embs_df.values.flatten(), patient_info ])
+    # When used to use embs
+    # patient_outcome_X = np.concatenate([embs_df.values.flatten(), patient_info ])
+    patient_outcome_X = np.concatenate([patient_info, np.array([present_prob]) ])
     outcome_proba = model['outcome_model'].predict(patient_outcome_X.reshape(1, -1).astype(float32))[0][0]
     
     outcome_probabilities = np.array([outcome_proba, 1 - outcome_proba])
@@ -2080,7 +2095,7 @@ def get_murmur_decision_model_pretrained(murmur_model):
     return murmur_decision_new
 
 def get_outcome_decision_model():
-    input_layer = tf.keras.layers.InputLayer(input_shape=(len(demographics) + ALGORITHM_HPS[EMBS_SIZE_lbl] * ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl],))
+    input_layer = tf.keras.layers.InputLayer(input_shape=(len(demographics) + 1,))
     layer_1 = CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True})
     # layer_dense = tf.keras.layers.Dense(8, activation="re_lu"),
     # layer_dropout = tf.keras.layers.Dropout(0.5, seed=42),

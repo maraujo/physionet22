@@ -1783,7 +1783,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     min_delta=0,
                     patience=20,
                     verbose=0,
-                    mode="max",
+                    mode="min",
                     baseline=None,
                     restore_best_weights=True
                 )], workers=WORKERS)   
@@ -2102,11 +2102,11 @@ def get_outcome_decision_model():
     model_layers = [input_layer, layer_1]
     for _ in range(ALGORITHM_HPS[N_DECISION_LAYERS_lbl]):
         model_layers.append(tf.keras.layers.Dense(ALGORITHM_HPS[NEURONS_DECISION_lbl], activation="relu", kernel_initializer=generate_kernel_initialization()))
-        if ALGORITHM_HPS[IS_DROPOUT_IN_DECISION_lbl]:
-            model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
+        # if ALGORITHM_HPS[IS_DROPOUT_IN_DECISION_lbl]:
+        #     model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid", kernel_initializer=generate_kernel_initialization()))
     murmur_decision_new = tf.keras.Sequential(model_layers)
-    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate':10*ALGORITHM_HPS[LEARNING_RATE_DECISION_lbl],'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=[ohh_compute_cost_tf] + get_all_metrics())
+    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_DECISION_lbl],'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=[ohh_compute_cost_tf] + get_all_metrics())
     return murmur_decision_new
 
 def get_murmur_decision_model():

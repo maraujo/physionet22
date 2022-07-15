@@ -177,6 +177,10 @@ IS_MURMUR_MODEL_XCEPTION_lbl = "IS_MURMUR_MODEL_XCEPTION"
 N_MURMUR_CNN_NEURONS_LAYERS_lbl = "N_MURMUR_CNN_NEURONS_LAYERS"
 DROPOUT_VALUE_IN_MURMUR_lbl = "DROPOUT_VALUE_IN_MURMUR"
 IS_DROPOUT_IN_MURMUR_lbl = "DROPOUT_IN_MURMUR"
+DROPOUT_IN_OUTCOME_lbl = "DROPOUT_IN_OUTCOME"
+DROPOUT_VALUE_IN_OUTCOME_lbl = "DROPOUT_VALUE_IN_OUTCOME"
+NEURONS_OUTCOME_lbl = "NEURONS_OUTCOME"
+N_OUTCOME_LAYERS_lbl = "N_OUTCOME_LAYERS"
 N_MURMUR_LAYERS_lbl = "N_MURMUR_LAYERS"
 STEPS_PER_EPOCH_DECISION_lbl = "STEPS_PER_EPOCH_DECISION"
 UNKOWN_RANDOM_MIN_THRESHOLD_lbl = "UNKOWN_RANDOM_MIN_THRESHOLD"
@@ -221,8 +225,10 @@ ALGORITHM_HPS = {
     REMOVE_NOISE_lbl : True,
     batch_size_murmur_lbl : 32,
     CNN_MURMUR_MODEL_lbl : True,
+    NEURONS_OUTCOME_lbl : 128,
     N_DECISION_LAYERS_lbl : 1,
     NEURONS_DECISION_lbl : 8,
+    N_OUTCOME_LAYERS_lbl : 2,
     IS_DROPOUT_IN_DECISION_lbl : False,
     DROPOUT_VALUE_IN_DECISION_lbl : 0.2,
     IS_MURMUR_MODEL_XCEPTION_lbl : False,
@@ -243,10 +249,12 @@ ALGORITHM_HPS = {
     FINAL_TRAINING_lbl : True,
     USE_COMPLEX_MODELS_lbl : True,
     RUN_TEST_lbl : False,
+    DROPOUT_IN_OUTCOME_lbl : False,
+    DROPOUT_VALUE_IN_OUTCOME_lbl : 0.25,
     LEARNING_RATE_NOISE_lbl : 0.0001,
     LEARNING_RATE_MURMUR_lbl : 0.0001,
     LEARNING_RATE_DECISION_lbl : 0.0001,
-    LEARNING_RATE_OUTCOME_lbl : 0.01
+    LEARNING_RATE_OUTCOME_lbl : 0.001
 }
 
 
@@ -310,7 +318,7 @@ if ALGORITHM_HPS[RUN_TEST_lbl]:
     MURMUR_EPOCHS = 1
     NOISE_EPOCHS = 1
     MURMUR_DECISION_EPOCHS = 1
-    OUTCOME_DECISION_EPOCHS = 1
+    OUTCOME_DECISION_EPOCHS = 20
     MAX_TRIALS = 1
 else:
     logger.info("Running full")
@@ -1676,15 +1684,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
                 x = thresholds_df.index.values
                 kn = KneeLocator(x, y, curve='convex', direction='decreasing')
-                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee if kn.knee else x[0]
+                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee
             else:
                 ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
             logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
             converged = True
         else:
             logger.error("THRESHOLD NOT CHANGED!")
-            import ipdb;ipdb.set_trace()
-            pass
             if ALGORITHM_HPS[RUN_TEST_lbl]:
                 converged = True
             if runs == 3:
@@ -1820,12 +1826,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
         if all_positive == 0 or all_negative == 0 or tn == 0:
             continue
         ohh_metric = (tp / all_positive) / (tn / all_negative)
-        if  (tp / (tp + fn)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl] or (tn / (tn + fp)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl]:
-            continue
+        cost = ohh_compute_cost(enc.inverse_transform(test_labels).flatten(), enc.inverse_transform(test_predictions).flatten())
+        # if  (tp / (tp + fn)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl] or (tn / (tn + fp)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl]:
+        #     continue
         
         cwa = cwa_fn(test_labels, test_predictions, classes = ["Abnormal", "Normal"])
         cwa_thresholds.append({
             "cwa" : cwa,
+            "cost" : cost,
             "thresholds" : threshold,
             "ohh_metric" : ohh_metric,
             "sensitivity" : tp / (tp + fn),
@@ -1836,17 +1844,19 @@ def train_challenge_model(data_folder, model_folder, verbose):
         thresholds_df = thresholds_df.set_index("thresholds")
         thresholds_df.plot()
         plt.savefig("thresholds_decision.png")
-        if thresholds_df.shape[0] > 5:
-            y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
-            x = thresholds_df.index.values
-            kn = KneeLocator(x, y, curve='convex', direction='decreasing')
-            ALGORITHM_HPS[FINAL_OUTCOME_THRESHOLD_lbl] = kn.knee
-        else:
-            ALGORITHM_HPS[FINAL_OUTCOME_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
-        logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
-        converged = True
+        # if thresholds_df.shape[0] > 5:
+        #     y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
+        #     x = thresholds_df.index.values
+        #     kn = KneeLocator(x, y, curve='convex', direction='decreasing')
+        #     ALGORITHM_HPS[FINAL_OUTCOME_THRESHOLD_lbl] = kn.knee
+        # else:
+        ALGORITHM_HPS[FINAL_OUTCOME_THRESHOLD_lbl] = thresholds_df["cost"].idxmin()
+        if verbose >= 1:
+            logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
+            logger.info("New threshold outcome: {}".format(ALGORITHM_HPS[FINAL_OUTCOME_THRESHOLD_lbl]))
     else:
-        logger.error("THRESHOLD NOT CHANGED!")
+        if verbose >= 1:
+            logger.error("THRESHOLD NOT CHANGED OUTCOME!")
     #XGBoost
     # hyperparameter_grid = {
     #     'n_estimators': [100, 400, 800],
@@ -2158,13 +2168,13 @@ def get_outcome_decision_model():
     # layer_dense = tf.keras.layers.Dense(8, activation="re_lu"),
     # layer_dropout = tf.keras.layers.Dropout(0.5, seed=42),
     model_layers = [input_layer, layer_1]
-    for _ in range(ALGORITHM_HPS[N_DECISION_LAYERS_lbl]):
+    for _ in range(ALGORITHM_HPS[N_OUTCOME_LAYERS_lbl]):
         model_layers.append(tf.keras.layers.Dense(ALGORITHM_HPS[NEURONS_DECISION_lbl], activation="relu", kernel_initializer=generate_kernel_initialization()))
-        # if ALGORITHM_HPS[IS_DROPOUT_IN_DECISION_lbl]:
-        #     model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
+        if ALGORITHM_HPS[DROPOUT_IN_OUTCOME_lbl]:
+            model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_OUTCOME_lbl], seed=42))
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid", kernel_initializer=generate_kernel_initialization()))
     murmur_decision_new = tf.keras.Sequential(model_layers)
-    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_OUTCOME_lbl],'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=[ohh_compute_cost_tf] + get_all_metrics())
+    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_DECISION_lbl],'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=[ohh_compute_cost_tf] + get_all_metrics())
     return murmur_decision_new
 
 def get_murmur_decision_model():

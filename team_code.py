@@ -310,7 +310,7 @@ if ALGORITHM_HPS[RUN_TEST_lbl]:
     MURMUR_EPOCHS = 1
     NOISE_EPOCHS = 1
     MURMUR_DECISION_EPOCHS = 1
-    OUTCOME_DECISION_EPOCHS = 20
+    OUTCOME_DECISION_EPOCHS = 1
     MAX_TRIALS = 1
 else:
     logger.info("Running full")
@@ -1419,10 +1419,12 @@ def train_challenge_model(data_folder, model_folder, verbose):
     murmur_murmur_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]) )
     murmur_murmur_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]), )
        
-    # sklearn_weights_murmur = class_weight.compute_class_weight("balanced",classes=[False, True], y= (np.vstack(murmur_model_dataset_train.map(lambda x,y: y)) == 1).reshape(1,-1)[0].tolist())
-    # sklearn_weights_murmur = dict(enumerate(sklearn_weights_murmur))
-    sklearn_weights_murmur = {0 :1, 1:1}
+    sklearn_weights_murmur = class_weight.compute_class_weight("balanced",classes=[False, True], y= (np.vstack(murmur_model_dataset_train.map(lambda x,y: y)) == 1).reshape(1,-1)[0].tolist())
+    sklearn_weights_murmur = dict(enumerate(sklearn_weights_murmur))
+    # sklearn_weights_murmur = {0 :1, 1:1}
+    logger.info("Murmur Detection Class Weight Original: {}".format(sklearn_weights_murmur))
     sklearn_weights_murmur[1] *= ALGORITHM_HPS[class_weight_murmur_lbl]
+    logger.info("Murmur Detection Class Weight Adjusted: {}".format(sklearn_weights_murmur))
     
     # I have this while because for some random reason, the model does not converge. So, I keep increasing the patience untill it get out of local minima
     converged = False
@@ -1569,7 +1571,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
 
         sklearn_weights_decision = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.vstack(train_decision_dataset.map(lambda x,y: y)).flatten().tolist())
         sklearn_weights_decision = dict(enumerate(sklearn_weights_decision))
+        logger.info("Decision Detection Class Weight Original: {}".format(sklearn_weights_decision))
         sklearn_weights_decision[1] *= ALGORITHM_HPS[class_weight_decision_lbl]
+        logger.info("Decision Detection Class Weight Adjusted: {}".format(sklearn_weights_decision))
         
         
         if ALGORITHM_HPS[FINAL_TRAINING_lbl]:
@@ -1679,9 +1683,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
             converged = True
         else:
             logger.error("THRESHOLD NOT CHANGED!")
+            import ipdb;ipdb.set_trace()
+            pass
             if ALGORITHM_HPS[RUN_TEST_lbl]:
                 converged = True
-            if runs == 5:
+            if runs == 3:
                 raise Exception("THRESHOLD NOT CHANGED!")
             runs += 1
             tf.keras.utils.set_random_seed(ORIGINAL_SEED + runs)

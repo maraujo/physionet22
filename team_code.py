@@ -194,11 +194,13 @@ FINAL_TRAINING_lbl = "FINAL_TRAINING"
 USE_COMPLEX_MODELS_lbl = "USE_COMPLEX_MODELS"
 RUN_TEST_lbl = "RUN_TEST"
 FINAL_DECISION_THRESHOLD_lbl = "FINAL_DECISION_THRESHOLD"
+FINAL_OUTCOME_THRESHOLD_lbl = "FINAL_OUTCOME_THRESHOLD"
 MIN_SENS_AND_SPEC_lbl = "MIN_SENS_AND_SPEC"
 REMOVE_NOISE_lbl = "REMOVE_NOISE"
 LEARNING_RATE_NOISE_lbl = "LEARNING_RATE_NOISE"
 LEARNING_RATE_MURMUR_lbl = "LEARNING_RATE_MURMUR"
 LEARNING_RATE_DECISION_lbl = "LEARNING_RATE_DECISION"
+LEARNING_RATE_OUTCOME_lbl = "LEARNING_RATE_OUTCOME"
 
 ALGORITHM_HPS = {
     EMBS_SIZE_lbl : 2,
@@ -212,6 +214,7 @@ ALGORITHM_HPS = {
     IMG_HEIGHT_RATIO_lbl : 1,
     STEPS_PER_EPOCH_DECISION_lbl : None,
     FINAL_DECISION_THRESHOLD_lbl : 0.5,
+    FINAL_OUTCOME_THRESHOLD_lbl : 0.5,
     MURMUR_IMAGE_SIZE_lbl : 108,
     VAL_FRAC_MURMUR_lbl : 0.3,
     NOISE_IMAGE_SIZE_lbl : 108,
@@ -243,6 +246,7 @@ ALGORITHM_HPS = {
     LEARNING_RATE_NOISE_lbl : 0.0001,
     LEARNING_RATE_MURMUR_lbl : 0.0001,
     LEARNING_RATE_DECISION_lbl : 0.0001,
+    LEARNING_RATE_OUTCOME_lbl : 0.001
 }
 
 
@@ -306,7 +310,7 @@ if ALGORITHM_HPS[RUN_TEST_lbl]:
     MURMUR_EPOCHS = 1
     NOISE_EPOCHS = 1
     MURMUR_DECISION_EPOCHS = 1
-    OUTCOME_DECISION_EPOCHS = 1
+    OUTCOME_DECISION_EPOCHS = 20
     MAX_TRIALS = 1
 else:
     logger.info("Running full")
@@ -1625,8 +1629,12 @@ def train_challenge_model(data_folder, model_folder, verbose):
         logger.info("Find best threshold...")
         
         #Fuse train and test to choose decision thresholds? Doing this in faith since val has low number of samples.
-        test_predictions_proba = murmur_decision_new.predict(np.vstack(embs_train + embs_val + embs_test))
-        test_labels_original = np.array([*embs_label_train] + [*embs_label_val] + [*embs_label_test]).reshape(-1,1)
+        # test_predictions_proba = murmur_decision_new.predict(np.vstack(embs_train + embs_val + embs_test))
+        # test_labels_original = np.array([*embs_label_train] + [*embs_label_val] + [*embs_label_test]).reshape(-1,1)
+        # Maybe not
+        test_predictions_proba = murmur_decision_new.predict(np.vstack(embs_test))
+        test_labels_original = np.array([*embs_label_test]).reshape(-1,1)
+        
         
         # test_decision_dataset = train_decision_dataset.concatenate(val_decision_dataset)
         
@@ -1768,14 +1776,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # model.run_eagerly
     # FFN Decision
 
-    train_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1))).batch(min(len(embs_train), len(embs_val), ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl]), drop_remainder=True)
-    val_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(val_input_X), val_input_y.reshape(-1,1))).batch(min(len(embs_train), len(embs_val), ALGORITHM_HPS[BATCH_SIZE_DECISION_lbl]), drop_remainder=True)
+    train_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1))).batch(4, drop_remainder=True)
+    val_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(val_input_X), val_input_y.reshape(-1,1))).batch(4, drop_remainder=True)
     test_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(test_input_X), test_input_y.reshape(-1,1))).batch(1)
     sklearn_weights_outcome_decision = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.vstack(train_outcome.map(lambda x,y: y)).flatten().tolist())
-    sklearn_weights_outcome_decision = dict(enumerate(sklearn_weights_decision))
+    sklearn_weights_outcome_decision = dict(enumerate(sklearn_weights_outcome_decision))
     sklearn_weights_outcome_decision[1] *= ALGORITHM_HPS[class_weight_outcome_lbl]
     
-    
+    logger.info("Class balacing: {}".format(sklearn_weights_outcome_decision))
     outcome_model_new = get_outcome_decision_model()
     outcome_class_weight = sklearn_weights_outcome_decision
     outcome_model_new.fit(train_outcome, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_outcome, epochs = OUTCOME_DECISION_EPOCHS, class_weight=outcome_class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
@@ -1783,13 +1791,56 @@ def train_challenge_model(data_folder, model_folder, verbose):
                     min_delta=0,
                     patience=20,
                     verbose=0,
-                    mode="max",
+                    mode="min",
                     baseline=None,
                     restore_best_weights=True
                 )], workers=WORKERS)   
     logger.info("Outcome Detection Model Classification Report")
     decision_evaluation = outcome_model_new.evaluate(test_outcome, return_dict=True) 
-    logger.info("Find best threshold...")
+    logger.info("Find best threshold for outcome...")
+    
+    test_predictions_proba = outcome_model_new.predict(test_input_X)
+    test_labels_original = np.array([*test_input_y]).reshape(-1,1)
+    cwa_thresholds = []
+    for threshold in np.arange(0,1,0.01):
+        test_labels = test_labels_original.copy()
+        test_predictions = (test_predictions_proba > threshold)
+        test_predictions = enc.transform(test_predictions).toarray()
+        # test_labels = np.vstack(test_decision_dataset.map(lambda x, y: y))
+        test_labels = enc.transform(test_labels).toarray()
+        tn, fp, fn, tp =  confusion_matrix(enc.inverse_transform(test_labels).flatten(), enc.inverse_transform(test_predictions).flatten(), labels=[False, True]).flatten()
+        all_positive = tp+fn
+        all_negative = tn+fp
+        if all_positive == 0 or all_negative == 0 or tn == 0:
+            continue
+        ohh_metric = (tp / all_positive) / (tn / all_negative)
+        if  (tp / (tp + fn)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl] or (tn / (tn + fp)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl]:
+            continue
+        
+        cwa = cwa_fn(test_labels, test_predictions, classes = ["Abnormal", "Normal"])
+        cwa_thresholds.append({
+            "cwa" : cwa,
+            "thresholds" : threshold,
+            "ohh_metric" : ohh_metric,
+            "sensitivity" : tp / (tp + fn),
+            "specificity" : tn / (tn + fp)
+        })
+    thresholds_df = pd.DataFrame(cwa_thresholds)
+    if thresholds_df.shape[0] > 0:
+        thresholds_df = thresholds_df.set_index("thresholds")
+        thresholds_df.plot()
+        plt.savefig("thresholds_decision.png")
+        if thresholds_df.shape[0] > 5:
+            y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
+            x = thresholds_df.index.values
+            kn = KneeLocator(x, y, curve='convex', direction='decreasing')
+            ALGORITHM_HPS[FINAL_OUTCOME_THRESHOLD_lbl] = kn.knee
+        else:
+            ALGORITHM_HPS[FINAL_OUTCOME_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
+        logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
+        converged = True
+    else:
+        logger.error("THRESHOLD NOT CHANGED!")
     #XGBoost
     # hyperparameter_grid = {
     #     'n_estimators': [100, 400, 800],
@@ -2008,7 +2059,7 @@ def run_challenge_model(model, data, recordings, verbose):
     probabilities = np.concatenate([murmur_probabilities, outcome_probabilities])
     
     murmur_labels = murmur_probabilities > model[FINAL_DECISION_THRESHOLD_lbl]
-    outcome_labels = outcome_probabilities > 0.5
+    outcome_labels = outcome_probabilities > model[FINAL_OUTCOME_THRESHOLD_lbl]
     labels = np.concatenate([murmur_labels, outcome_labels])
     classes = murmur_classes + outcome_classes
     # import ipdb;ipdb.set_trace()
@@ -2067,6 +2118,7 @@ def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decisio
         NOISE_IMAGE_SIZE_lbl : ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl],
         MURMUR_IMAGE_SIZE_lbl : ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl],
         FINAL_DECISION_THRESHOLD_lbl : ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl],
+        FINAL_OUTCOME_THRESHOLD_lbl : ALGORITHM_HPS[FINAL_OUTCOME_THRESHOLD_lbl],
         "weight_mean" : weight_mean,
         "height_mean" : height_mean,
         "age_mode" : age_mode,
@@ -2102,11 +2154,11 @@ def get_outcome_decision_model():
     model_layers = [input_layer, layer_1]
     for _ in range(ALGORITHM_HPS[N_DECISION_LAYERS_lbl]):
         model_layers.append(tf.keras.layers.Dense(ALGORITHM_HPS[NEURONS_DECISION_lbl], activation="relu", kernel_initializer=generate_kernel_initialization()))
-        if ALGORITHM_HPS[IS_DROPOUT_IN_DECISION_lbl]:
-            model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
+        # if ALGORITHM_HPS[IS_DROPOUT_IN_DECISION_lbl]:
+        #     model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid", kernel_initializer=generate_kernel_initialization()))
     murmur_decision_new = tf.keras.Sequential(model_layers)
-    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate':10*ALGORITHM_HPS[LEARNING_RATE_DECISION_lbl],'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=[ohh_compute_cost_tf] + get_all_metrics())
+    murmur_decision_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'decay':0.0, 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_DECISION_lbl],'beta_1': 0.9, 'beta_2': 0.999, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=[ohh_compute_cost_tf] + get_all_metrics())
     return murmur_decision_new
 
 def get_murmur_decision_model():

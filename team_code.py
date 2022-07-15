@@ -1672,7 +1672,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
                 x = thresholds_df.index.values
                 kn = KneeLocator(x, y, curve='convex', direction='decreasing')
-                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee
+                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee if kn.knee else x[0]
             else:
                 ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
             logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))

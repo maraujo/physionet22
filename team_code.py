@@ -1478,7 +1478,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                                 epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_auc",
                 min_delta=0,
-                patience=20,
+                patience=40,
                 verbose=0,
                 mode="max",
                 baseline=None,
@@ -1798,8 +1798,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # model.run_eagerly
     # FFN Decision
 
-    train_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1))).batch(4, drop_remainder=True)
-    val_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(val_input_X), val_input_y.reshape(-1,1))).batch(4, drop_remainder=True)
+    train_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1))).batch(64, drop_remainder=True)
+    val_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(val_input_X), val_input_y.reshape(-1,1))).batch(64, drop_remainder=True)
     test_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(test_input_X), test_input_y.reshape(-1,1))).batch(1)
     sklearn_weights_outcome_decision = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.vstack(train_outcome.map(lambda x,y: y)).flatten().tolist())
     sklearn_weights_outcome_decision = dict(enumerate(sklearn_weights_outcome_decision))

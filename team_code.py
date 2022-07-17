@@ -206,9 +206,13 @@ LEARNING_RATE_NOISE_lbl = "LEARNING_RATE_NOISE"
 LEARNING_RATE_MURMUR_lbl = "LEARNING_RATE_MURMUR"
 LEARNING_RATE_DECISION_lbl = "LEARNING_RATE_DECISION"
 LEARNING_RATE_OUTCOME_lbl = "LEARNING_RATE_OUTCOME"
+ACTIVATION_FUNCTION_lbl = "ACTIVATION_FUNCTION"
+NORMALIZE_OUTCOMES_lbl = "NORMALIZE_OUTCOMES" 
 
 ALGORITHM_HPS = {
     EMBS_SIZE_lbl : 2,
+    NORMALIZE_OUTCOMES_lbl : True,
+    ACTIVATION_FUNCTION_lbl : "relu",
     MIN_SENS_AND_SPEC_lbl : 0.68,
     RESHUFFLE_PATIENT_EMBS_N_lbl : 4,
     EMBDS_PER_PATIENTS_lbl : 50,
@@ -250,7 +254,7 @@ ALGORITHM_HPS = {
     FINAL_TRAINING_lbl : True,
     USE_COMPLEX_MODELS_lbl : True,
     RUN_TEST_lbl : False,
-    DROPOUT_IN_OUTCOME_lbl : False,
+    DROPOUT_IN_OUTCOME_lbl : True,
     DROPOUT_VALUE_IN_OUTCOME_lbl : 0.25,
     LEARNING_RATE_NOISE_lbl : 0.0001,
     LEARNING_RATE_MURMUR_lbl : 0.001,
@@ -258,14 +262,20 @@ ALGORITHM_HPS = {
     LEARNING_RATE_OUTCOME_lbl : 0.001
 }
 
-
-
 if os.path.exists("ohh.config"):
     import boto3
     OHH_ARGS = json.loads(open("ohh.config", "r").read().strip())
     if ("AWS_ID" in OHH_ARGS) and ("AWS_PASS" in OHH_ARGS):
         s3 = boto3.client("s3",  aws_access_key_id=OHH_ARGS["AWS_ID"], aws_secret_access_key=OHH_ARGS["AWS_PASS"])
     ALGORITHM_HPS.update(OHH_ARGS)
+
+if  ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl] == "relu":
+    ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl] = tf.keras.layers.ReLU
+elif ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl] == "leaky_relu":
+    ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl] = lambda : tf.keras.layers.LeakyReLU(alpha=0.1)
+else:
+    raise NotImplementedError("Only rely or leaky relu allowed.")
+
     
     # ALGORITHM_HPS[RUN_TEST_lbl]  = OHH_ARGS["TEST_MODE"]
     # if EMBS_SIZE_lbl in OHH_ARGS:
@@ -1175,14 +1185,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 
             else:
                 noise_model_new = tf.keras.models.Sequential()
-                noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation='relu', kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl],  ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
+                noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl],  ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
                 noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
                 noise_model_new.add(tf.keras.layers.Dropout(.2))
-                noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation='relu', kernel_initializer=generate_kernel_initialization(),  input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
+                noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(),  input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
                 noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
                 noise_model_new.add(tf.keras.layers.Flatten())
                 noise_model_new.add(tf.keras.layers.Dropout(.5))
-                noise_model_new.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation='relu', kernel_initializer=generate_kernel_initialization()))
+                noise_model_new.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization()))
                 noise_model_new.add(tf.keras.layers.Dense(1, activation='sigmoid', kernel_initializer=generate_kernel_initialization()))
                 noise_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': ALGORITHM_HPS[LEARNING_RATE_NOISE_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), 
                         loss="binary_crossentropy",
@@ -1393,12 +1403,14 @@ def train_challenge_model(data_folder, model_folder, verbose):
             continue
         predictions = noise_model_new.predict(noise_detection_dataset)
         noise_murmur_df_list = noise_murmur_df_list.append(pd.DataFrame({"predictions" : predictions.flatten(), "filepath" : noise_detection_dataset.file_paths}))
-    
-
     if noise_murmur_df_list.shape[0] > 0:
         logger.info("Files to evaluated by noise: {}".format(noise_murmur_df_list.shape[0]))
         logger.info("First 10: {}".format(noise_murmur_df_list.head(10)))      
         files_to_exclude = noise_murmur_df_list[noise_murmur_df_list["predictions"] > 0.5]
+        logger.info("Clear at most 30\% (arbitrarly chosen) of all training files.")
+        limit_max = int(noise_murmur_df_list.shape[0] * 0.3)
+        if files_to_exclude.shape[0] > limit_max:
+            files_to_exclude = files_to_exclude.sample(limit_max, random_state = 42)
         logger.info("Remove noisy files: {}".format(files_to_exclude.shape[0]))
         if not ALGORITHM_HPS[RUN_TEST_lbl] and files_to_exclude.shape[0] > 0:
             for filepath in tqdm(files_to_exclude["filepath"]):
@@ -1705,6 +1717,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
             if runs == 3:
                 raise Exception("THRESHOLD NOT CHANGED!")
             runs += 1
+            logger.info("Maibe the issue was too many dead neurons")
+            ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl] = lambda : tf.keras.layers.LeakyReLU(alpha=0.1)
             tf.keras.utils.set_random_seed(ORIGINAL_SEED + runs)
             tf.keras.backend.clear_session()
                 
@@ -1765,11 +1779,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
     patient_means = patients_file_informations_values_df.mean()
     patient_stds = patients_file_informations_values_df.std()
     # Normalize features?
-    # patients_file_informations_values_df = (patients_file_informations_values_df - patient_means) / patient_stds
+    if ALGORITHM_HPS[NORMALIZE_OUTCOMES_lbl]:
+        patients_file_informations_values_df = (patients_file_informations_values_df - patient_means) / patient_stds
     patients_file_informations_df[demographics] = patients_file_informations_values_df[demographics].values
     patients_file_informations_df["patient_id"] = patients_file_informations_df["file_prefix"].apply(lambda x: x.split("_")[0])
     # Why remove duplicates?
-     
     embs_patient_id_df = pd.DataFrame(zip([*embs_train_original] + [*embs_val_original] + [*embs_test_original], embs_patient_id_train + embs_patient_id_val + embs_patient_id_test), columns=["embs", "patient_id"])
     # embs_patient_id_df = embs_patient_id_df.drop_duplicates(subset=["patient_id"])
     embs_patient_id_df["pred"] = murmur_decision_new.predict(np.vstack(embs_patient_id_df["embs"])).flatten()
@@ -1811,7 +1825,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     outcome_model_new.fit(train_outcome, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_outcome, epochs = OUTCOME_DECISION_EPOCHS, class_weight=outcome_class_weight, callbacks=[tf.keras.callbacks.EarlyStopping(
                     monitor="val_loss",
                     min_delta=0,
-                    patience=20,
+                    patience=50,
                     verbose=0,
                     mode="min",
                     baseline=None,
@@ -2076,7 +2090,8 @@ def run_challenge_model(model, data, recordings, verbose):
     
     patient_info = np.concatenate([patient_demographics[demographics[:-3]].values, age_dummified])
     # Normalization?
-    # patient_info = (patient_info - model["patient_means"].values) /  model["patient_stds"].values
+    if ALGORITHM_HPS[NORMALIZE_OUTCOMES_lbl]:
+        patient_info = (patient_info - model["patient_means"].values) /  model["patient_stds"].values
     # When used to use embs
     # patient_outcome_X = np.concatenate([embs_df.values.flatten(), patient_info ])
     patient_outcome_X = np.concatenate([patient_info, np.array([present_prob]) ])
@@ -2179,8 +2194,10 @@ def get_outcome_decision_model():
     # layer_dense = tf.keras.layers.Dense(8, activation="re_lu"),
     # layer_dropout = tf.keras.layers.Dropout(0.5, seed=42),
     model_layers = [input_layer, layer_1]
+    if ALGORITHM_HPS[DROPOUT_IN_OUTCOME_lbl]:
+        model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_OUTCOME_lbl], seed=42))
     for _ in range(ALGORITHM_HPS[N_OUTCOME_LAYERS_lbl]):
-        model_layers.append(tf.keras.layers.Dense(ALGORITHM_HPS[NEURONS_DECISION_lbl], activation="relu", kernel_initializer=generate_kernel_initialization()))
+        model_layers.append(tf.keras.layers.Dense(ALGORITHM_HPS[NEURONS_DECISION_lbl], activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization()))
         if ALGORITHM_HPS[DROPOUT_IN_OUTCOME_lbl]:
             model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_OUTCOME_lbl], seed=42))
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid", kernel_initializer=generate_kernel_initialization()))
@@ -2197,7 +2214,7 @@ def get_murmur_decision_model():
     if ALGORITHM_HPS[IS_DROPOUT_IN_DECISION_lbl]:
         model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
     for _ in range(ALGORITHM_HPS[N_DECISION_LAYERS_lbl]):
-        model_layers.append(tf.keras.layers.Dense(ALGORITHM_HPS[NEURONS_DECISION_lbl], activation="relu", kernel_initializer=generate_kernel_initialization()))
+        model_layers.append(tf.keras.layers.Dense(ALGORITHM_HPS[NEURONS_DECISION_lbl], activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization()))
         if ALGORITHM_HPS[IS_DROPOUT_IN_DECISION_lbl]:
             model_layers.append(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_DECISION_lbl], seed=42))
     model_layers.append(tf.keras.layers.Dense(1, activation="sigmoid", kernel_initializer=generate_kernel_initialization()))
@@ -2206,7 +2223,8 @@ def get_murmur_decision_model():
     return murmur_decision_new
 
 def generate_kernel_initialization():
-    return tf.keras.initializers.LecunNormal()    
+    return tf.keras.initializers.LecunNormal()
+        
      
 def get_murmur_decision_model_configs():
     murmur_decision_config = {'name': 'model', 'layers': [{'class_name': 'InputLayer', 'config': {'batch_input_shape': (None, ALGORITHM_HPS[EMBS_SIZE_lbl] * ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]), 'dtype': 'float32', 'sparse': False, 'ragged': False, 'name': 'input_1'}, 'name': 'input_1', 'inbound_nodes': []}, {'class_name': 'Custom>CastToFloat32', 'config': {'name': 'cast_to_float32', 'trainable': True, 'dtype': 'float32'}, 'name': 'cast_to_float32', 'inbound_nodes': [[['input_1', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense', 'trainable': True, 'dtype': 'float32', 'units': 1024, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense', 'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]]}, {'class_name': 'ReLU', 'config': {'name': 're_lu', 'trainable': True, 'dtype': 'float32', 'max_value': None, 'negative_slope': array(0., dtype=float32), 'threshold': array(0., dtype=float32)}, 'name': 're_lu', 'inbound_nodes': [[['dense', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense_1', 'trainable': True, 'dtype': 'float32', 'units': 1, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense_1', 'inbound_nodes': [[['re_lu', 0, 0, {}]]]}, {'class_name': 'Activation', 'config': {'name': 'classification_head_1', 'trainable': True, 'dtype': 'float32', 'activation': 'sigmoid'}, 'name': 'classification_head_1', 'inbound_nodes': [[['dense_1', 0, 0, {}]]]}], 'input_layers': [['input_1', 0, 0]], 'output_layers': [['classification_head_1', 0, 0]]}
@@ -2243,19 +2261,19 @@ def get_murmur_model():
         murmur_model = tf.keras.models.Sequential()
         murmur_model.add(CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}))
         murmur_model.add(tf.keras.layers.Rescaling(1./127.5, offset=-1))
-        murmur_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), kernel_initializer=generate_kernel_initialization(), activation='relu', input_shape=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], 3)))
+        murmur_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), kernel_initializer=generate_kernel_initialization(), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), input_shape=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], 3)))
         murmur_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
         if ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]:
             murmur_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
         for _ in range(ALGORITHM_HPS[N_MURMUR_LAYERS_lbl]):
-            murmur_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), kernel_initializer=generate_kernel_initialization(), activation='relu'))
+            murmur_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), kernel_initializer=generate_kernel_initialization(), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl]()))
             murmur_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
             if ALGORITHM_HPS[IS_DROPOUT_IN_MURMUR_lbl]:
                 murmur_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
         murmur_model.add(tf.keras.layers.Flatten())
         if ALGORITHM_HPS[IS_DROPOUT_IN_MURMUR_lbl]:
                 murmur_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
-        murmur_model.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation='relu', kernel_initializer=generate_kernel_initialization()))
+        murmur_model.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization()))
         murmur_model.add(tf.keras.layers.BatchNormalization())
         murmur_model.add(tf.keras.layers.Dense(1, activation='sigmoid', kernel_initializer=generate_kernel_initialization()))
                 
@@ -2274,19 +2292,19 @@ def get_noise_model_v2():
     noise_model = tf.keras.models.Sequential()
     noise_model.add(CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}))
     noise_model.add(tf.keras.layers.Rescaling(1./127.5, offset=-1))
-    noise_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), activation='relu', kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
+    noise_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
     noise_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
     if ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]:
         noise_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
     for _ in range(ALGORITHM_HPS[N_MURMUR_LAYERS_lbl]):
-        noise_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), kernel_initializer=generate_kernel_initialization(), activation='relu'))
+        noise_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), kernel_initializer=generate_kernel_initialization(), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl]()))
         noise_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
         if ALGORITHM_HPS[IS_DROPOUT_IN_MURMUR_lbl]:
             noise_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
     noise_model.add(tf.keras.layers.Flatten())
     if ALGORITHM_HPS[IS_DROPOUT_IN_MURMUR_lbl]:
             noise_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
-    noise_model.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation='relu', kernel_initializer=generate_kernel_initialization()))
+    noise_model.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization()))
     noise_model.add(tf.keras.layers.BatchNormalization())
     noise_model.add(tf.keras.layers.Dense(1, activation='sigmoid', kernel_initializer=generate_kernel_initialization()))
                 

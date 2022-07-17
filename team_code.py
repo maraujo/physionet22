@@ -2071,8 +2071,6 @@ def run_challenge_model(model, data, recordings, verbose):
     #Prepare data for outcome prediction
     # Train outcome model
     patient_demographics = pd.Series({
-                        "murmur" : get_murmur(data),
-                        "outcome" : get_outcome(data),
                         "pregnancy_status" : get_pregnancy_status(data),
                         "weight" : get_weight(data),
                         "height" : get_height(data),

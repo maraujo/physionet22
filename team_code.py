@@ -208,6 +208,7 @@ LEARNING_RATE_DECISION_lbl = "LEARNING_RATE_DECISION"
 LEARNING_RATE_OUTCOME_lbl = "LEARNING_RATE_OUTCOME"
 ACTIVATION_FUNCTION_lbl = "ACTIVATION_FUNCTION"
 NORMALIZE_OUTCOMES_lbl = "NORMALIZE_OUTCOMES" 
+FILTER_SIZE_CNN_lbl = "FILTER_SIZE_CNN"
 
 ALGORITHM_HPS = {
     EMBS_SIZE_lbl : 2,
@@ -219,6 +220,7 @@ ALGORITHM_HPS = {
     class_weight_murmur_lbl : 5,
     class_weight_decision_lbl : 5,
     class_weight_outcome_lbl : 5,
+    FILTER_SIZE_CNN_lbl : 3,
     TRAIN_FRAC_lbl : 0.8,
     IMG_HEIGHT_RATIO_lbl : 1,
     STEPS_PER_EPOCH_DECISION_lbl : None,
@@ -1185,10 +1187,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 
             else:
                 noise_model_new = tf.keras.models.Sequential()
-                noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl],  ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
+                noise_model_new.add(tf.keras.layers.Conv2D(32, (ALGORITHM_HPS[FILTER_SIZE_CNN_lbl], ALGORITHM_HPS[FILTER_SIZE_CNN_lbl]), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl],  ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
                 noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
                 noise_model_new.add(tf.keras.layers.Dropout(.2))
-                noise_model_new.add(tf.keras.layers.Conv2D(32, (3, 3), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(),  input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
+                noise_model_new.add(tf.keras.layers.Conv2D(32, (ALGORITHM_HPS[FILTER_SIZE_CNN_lbl], ALGORITHM_HPS[FILTER_SIZE_CNN_lbl]), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(),  input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
                 noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
                 noise_model_new.add(tf.keras.layers.Flatten())
                 noise_model_new.add(tf.keras.layers.Dropout(.5))
@@ -2261,12 +2263,12 @@ def get_murmur_model():
         murmur_model = tf.keras.models.Sequential()
         murmur_model.add(CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}))
         murmur_model.add(tf.keras.layers.Rescaling(1./127.5, offset=-1))
-        murmur_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), kernel_initializer=generate_kernel_initialization(), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), input_shape=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], 3)))
+        murmur_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (ALGORITHM_HPS[FILTER_SIZE_CNN_lbl], ALGORITHM_HPS[FILTER_SIZE_CNN_lbl]), kernel_initializer=generate_kernel_initialization(), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), input_shape=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], 3)))
         murmur_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
         if ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]:
             murmur_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
         for _ in range(ALGORITHM_HPS[N_MURMUR_LAYERS_lbl]):
-            murmur_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), kernel_initializer=generate_kernel_initialization(), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl]()))
+            murmur_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (ALGORITHM_HPS[FILTER_SIZE_CNN_lbl], ALGORITHM_HPS[FILTER_SIZE_CNN_lbl]), kernel_initializer=generate_kernel_initialization(), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl]()))
             murmur_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
             if ALGORITHM_HPS[IS_DROPOUT_IN_MURMUR_lbl]:
                 murmur_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
@@ -2292,12 +2294,12 @@ def get_noise_model_v2():
     noise_model = tf.keras.models.Sequential()
     noise_model.add(CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}))
     noise_model.add(tf.keras.layers.Rescaling(1./127.5, offset=-1))
-    noise_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
+    noise_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (ALGORITHM_HPS[FILTER_SIZE_CNN_lbl], ALGORITHM_HPS[FILTER_SIZE_CNN_lbl]), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
     noise_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
     if ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]:
         noise_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
     for _ in range(ALGORITHM_HPS[N_MURMUR_LAYERS_lbl]):
-        noise_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (3, 3), kernel_initializer=generate_kernel_initialization(), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl]()))
+        noise_model.add(tf.keras.layers.Conv2D(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], (ALGORITHM_HPS[FILTER_SIZE_CNN_lbl], ALGORITHM_HPS[FILTER_SIZE_CNN_lbl]), kernel_initializer=generate_kernel_initialization(), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl]()))
         noise_model.add(tf.keras.layers.MaxPooling2D((2, 2)))
         if ALGORITHM_HPS[IS_DROPOUT_IN_MURMUR_lbl]:
             noise_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))

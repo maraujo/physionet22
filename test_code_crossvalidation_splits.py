@@ -3,6 +3,7 @@ import pandas as pd
 commits = []
 #Run image against crossvalidation
 N_FOLDERS = 5
+UPDATE_SERVER = True
 murmur_results = []
 outcome_results = []
 RUN_TYPE = "system" # docker or system
@@ -39,6 +40,8 @@ def process_folder(commit="current"):
         outcome_result["fold"] = fold
         outcome_results.append(outcome_result.iloc[0])
         pd.DataFrame(outcome_results).to_csv("../outcome_final_result_{}.csv".format(commit))
+    if UPDATE_SERVER:
+        print("Updating server.")
 
 if __name__ == "__main__":
     if commits == []:

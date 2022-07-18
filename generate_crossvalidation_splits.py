@@ -7,6 +7,7 @@ from glob import glob
 import shutil
 
 N_FOLDERS = 5
+print("N_FOLDERS: {}".format(N_FOLDERS))
 INPUT_FOLDER = "../circor-heart-sound/1.0.3/training_data/"
 IS_MINI = False
 if IS_MINI:

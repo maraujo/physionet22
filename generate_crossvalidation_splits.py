@@ -33,7 +33,6 @@ if __name__ == "__main__":
         patient_data = load_patient_data(patient_file)
         patient_id = get_patient_id(patient_data)
         patient_label = get_murmur(patient_data)
-        print(patient_id)
         patient_infos.append({
             "id" : patient_id,
             "label" : patient_label 

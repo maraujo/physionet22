@@ -538,7 +538,7 @@ def generate_mel_wav_crops(filepath_output_folder):
   # librosa.cache.clear()
 
 def generate_mel_wav_crops_v2(filepath_output_folder):
-    filepath, output_folder = filepath_output_folder
+    filepath, output_folder, outcome_folder = filepath_output_folder
     seconds_window = 2
     # print(filepath)
     if output_folder:
@@ -560,11 +560,17 @@ def generate_mel_wav_crops_v2(filepath_output_folder):
             pil_image = pil_image_full.crop((image_begin, pil_image_height * (1-ALGORITHM_HPS[IMG_HEIGHT_RATIO_lbl]), image_end, pil_image_height))
             # pil_image = generate_mel_image(x_cut, sr, hop_length=32)
             output_filepath_prefix = output_folder.rstrip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
+            
             output_filepath_wav =  output_filepath_prefix + ".wav" 
             output_filepath_image = output_filepath_prefix + ".png" 
             # librosa.output.write_wav(filepath, x_cut, sr, norm=True)
             # x_cut = librosa.util.normalize(x_cut)
             pil_image.save(output_filepath_image)
+            
+            if outcome_folder:
+                outcome_output_filepath_prefix = outcome_folder.rstrip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
+                outcome_output_filepath_image = outcome_output_filepath_prefix + ".png"
+                pil_image.save(outcome_output_filepath_image)
             
             # sf.write(output_filepath_wav, x_cut, sr, 'PCM_16')
             pil_image.close()
@@ -1357,11 +1363,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
         logger.info("Generating melspectograms crops")
         prepare_train_val_test_murmur_folders()
         destiny_folders = []
+        outcome_destiny_folders = []
         for clean_file in tqdm(clean_files): 
             # TODO: This should be paralelized
             file_prefix = os.path.basename(clean_file).split("_clean")[0]
             file_info = patients_file_informations_df[patients_file_informations_df['file_prefix'] == file_prefix].iloc[0]
             destiny_folder = None
+            outcome_destiny_folder = None
             if file_info["murmur"] == "Present" and file_info["is_murmur_location"]:
                 if file_info["patient_id"] in train_set.values:
                     destiny_folder = train_positive_folder
@@ -1382,9 +1390,26 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 if file_info["patient_id"] in val_set.values:
                     destiny_folder = val_negative_folder
                 if file_info["patient_id"] in test_set.values:
-                    destiny_folder = test_negative_folder   
-            destiny_folders.append(destiny_folder)      
-        filepath_output_folder = zip(clean_files, destiny_folders)
+                    destiny_folder = test_negative_folder
+            
+            if file_info["outcome"] == "Abnormal" and file_info["is_murmur_location"]:
+                if file_info["patient_id"] in train_set.values:
+                    outcome_destiny_folder = train_outcome_positive_folder
+                if file_info["patient_id"] in val_set.values:
+                    outcome_destiny_folder = val_outcome_positive_folder
+                if file_info["patient_id"] in test_set.values:
+                    outcome_destiny_folder = test_outcome_positive_folder
+            if file_info["outcome"] == "Normal" and random.random() > ALGORITHM_HPS[UNKOWN_RANDOM_MIN_THRESHOLD_lbl]:
+                if file_info["patient_id"] in train_set.values:
+                    outcome_destiny_folder = train_outcome_negative_folder
+                if file_info["patient_id"] in val_set.values:
+                    outcome_destiny_folder = val_outcome_negative_folder
+                if file_info["patient_id"] in test_set.values:
+                    outcome_destiny_folder = test_outcome_negative_folder
+ 
+            destiny_folders.append(destiny_folder)  
+            outcome_destiny_folders.append(outcome_destiny_folder)    
+        filepath_output_folder = zip(clean_files, destiny_folders, outcome_destiny_folders)
         # for args_filepath in tqdm(filepath_output_folder):
         #     generate_mel_wav_crops_v2(args_filepath)
         pool = Pool(processes=(min(WORKERS, 8)))

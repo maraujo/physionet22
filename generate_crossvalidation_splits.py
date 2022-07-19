@@ -6,13 +6,14 @@ from pathlib import Path
 from glob import glob
 import shutil
 
-N_FOLDERS = 10
-INPUT_FOLDER = "/physionet_data/challenge/files/circor-heart-sound/1.0.3/training_data/"
+N_FOLDERS = 5
+print("N_FOLDERS: {}".format(N_FOLDERS))
+INPUT_FOLDER = "../circor-heart-sound/1.0.3/training_data/"
 IS_MINI = False
 if IS_MINI:
-    OUTPUT_FOLDER = "/physionet_data/challenge/files/cross-validation-data-1-0-3-mini/"
+    OUTPUT_FOLDER = "../cross-validation-data-1-0-3-mini/"
 else:
-    OUTPUT_FOLDER = "/physionet_data/challenge/files/cross-validation-data-1-0-3/"
+    OUTPUT_FOLDER = "../cross-validation-data-1-0-3/"
 seed = 42
     
 def create_folder_and_move(patient_infos, dst_folder):
@@ -32,7 +33,6 @@ if __name__ == "__main__":
         patient_data = load_patient_data(patient_file)
         patient_id = get_patient_id(patient_data)
         patient_label = get_murmur(patient_data)
-        print(patient_id)
         patient_infos.append({
             "id" : patient_id,
             "label" : patient_label 

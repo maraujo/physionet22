@@ -15,7 +15,7 @@ def process_folder(commit="current"):
     for fold in range(N_FOLDERS):
         print("Commit: {} Fold: {}".format(commit, fold))
         if RUN_TYPE == "docker":
-            folder = "/physionet_data/challenge/files/cross-validation-data-1-0-3/{}/".format(fold)
+            folder = "../cross-validation-data-1-0-3/{}/".format(fold)
             os.system("docker run --rm --shm-size=512M -v {}model:/physionet/model -v {}/test:/physionet/test_data -v {}/test_outputs:/physionet/test_outputs/ -v {}/train/:/physionet/training_data image bash ./test_in_docker.bash".format(folder,folder,folder,folder))
         elif RUN_TYPE == "system":
             folder = "./"
@@ -24,9 +24,9 @@ def process_folder(commit="current"):
             os.system("rm -r recordings_aux")
             os.system("rm -r images_aux")
             os.system("rm -r __pycache__")
-            os.system("python -u train_model.py /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/train model".format(fold))
-            os.system("python -u run_model.py model /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/test test_outputs".format(fold))
-            os.system("python -u evaluate_model.py /physionet_data/challenge/files/cross-validation-data-1-0-3/{}/test test_outputs/ model".format(fold))
+            os.system("python -u train_model.py ../cross-validation-data-1-0-3/{}/train model".format(fold))
+            os.system("python -u run_model.py model ../cross-validation-data-1-0-3/{}/test test_outputs".format(fold))
+            os.system("python -u evaluate_model.py ../cross-validation-data-1-0-3/{}/test test_outputs/ model".format(fold))
 
         murmur_script_path = folder + "model/murmur_result.csv"
         murmur_result = pd.read_csv(murmur_script_path)

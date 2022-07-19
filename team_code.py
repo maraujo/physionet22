@@ -265,10 +265,7 @@ ALGORITHM_HPS = {
 }
 
 if os.path.exists("ohh.config"):
-    import boto3
     OHH_ARGS = json.loads(open("ohh.config", "r").read().strip())
-    if ("AWS_ID" in OHH_ARGS) and ("AWS_PASS" in OHH_ARGS):
-        s3 = boto3.client("s3",  aws_access_key_id=OHH_ARGS["AWS_ID"], aws_secret_access_key=OHH_ARGS["AWS_PASS"])
     ALGORITHM_HPS.update(OHH_ARGS)
 
 if  ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl] == "relu":

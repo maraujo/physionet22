@@ -264,6 +264,9 @@ ALGORITHM_HPS = {
     LEARNING_RATE_OUTCOME_lbl : 0.001
 }
 
+if os.path.exists("ohh.config"):
+    ALGORITHM_HPS.update(OHH_ARGS)
+
 if  ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl] == "relu":
     ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl] = tf.keras.layers.ReLU
 elif ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl] == "leaky_relu":

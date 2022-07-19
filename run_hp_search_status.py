@@ -30,4 +30,4 @@ logger.info("Top 50 Murmurs:\n{}".format(tabulate(db_df.drop(["murmur_file", "ou
 
 logger.info("Best parameters:")
 best_parameters = db_df.drop(["murmur_file", "outcome_file"],axis=1).sort_values(by="mean_murmur", ascending=False).iloc[0]
-logger.info(pprint.pformat(best_parameters.to_dict()))
+logger.info(pprint.pformat(json.dumps(best_parameters.to_dict())))

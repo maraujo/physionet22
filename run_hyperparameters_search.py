@@ -13,6 +13,8 @@ import sys
 import logging
 import json
 import pprint
+import urllib.request
+import urllib.parse
 
 logging.basicConfig()
 logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
@@ -38,8 +40,18 @@ def update_results(murmur_file, outcome_file, mean_murmur, std_murmur, std_outco
 
 os.system("curl --create-dirs -o $HOME/.postgresql/root.crt -O https://cockroachlabs.cloud/clusters/6cadd36b-9892-418c-88c7-64a5781755ec/cert")
 
-while True:
+dir_path = os.getcwd()
 
+try:
+    os.system("apt install -y vim")
+    os.system("apt install -y htop")
+    os.system("apt install -y libsndfile1")
+    os.system("apt install -y unzip")
+except:
+    logger.warning("You need these libs installed.")
+
+
+while True:
     logger.info("Get parameter to run.")
     os.environ['DATABASE_URL'] = "cockroachdb://ohh:nZ-eJfpX1fro6l-b9szvCg@free-tier11.gcp-us-east1.cockroachlabs.cloud:26257/defaultdb?sslmode=verify-full&options=--cluster%3Damped-fox-1436"
     os.environ['DATABASE_URL_PSY'] = "postgresql://ohh:nZ-eJfpX1fro6l-b9szvCg@free-tier11.gcp-us-east1.cockroachlabs.cloud:26257/defaultdb?sslmode=verify-full&options=--cluster%3Damped-fox-1436"
@@ -67,31 +79,33 @@ while True:
     db_df.loc[parameter_run.name] = parameter_run
     update_timestamp(current_timestamp, parameter_run.parameter_id)
 
-    os.system("apt install -y vim")
-    os.system("apt install -y htop")
-    os.system("apt install -y libsndfile1")
-    os.system("apt install -y unzip")
+    
+    #Cleaning from previous run    
     os.system("rm -r ./cross-validation-data-1-0-3/")
+    os.system("rm -r ./circor-heart-sound/")
+    os.system("rm ./murmur_final_result_current.csv")
+    os.system("rm ./outcome_final_result_current.csv")
+    os.system("rm -r ./circor-heart-sound/")
 
     os.system("mkdir -p ./cross-validation-data-1-0-3/")
     os.system("mkdir -p ./circor-heart-sound/1.0.3/")
     os.system("git clone --branch matheus https://matheus:{}@github.com/maraujo/physionet22.git".format(github_token))
-    os.system("pip install -r ./physionet22/requirements.txt")
-    os.system("pip install tensorflow==2.8.2")
+    assert os.system("pip install -r ./physionet22/requirements.txt") == 0
+    assert os.system("pip install tensorflow==2.8.2") == 0
 
     os.system("rm the-circor-digiscope-phonocardiogram-dataset-1.0.3.zip")
-    os.system("wget https://physionet.org/static/published-projects/circor-heart-sound/the-circor-digiscope-phonocardiogram-dataset-1.0.3.zip")
-    os.system("unzip -q -o the-circor-digiscope-phonocardiogram-dataset-1.0.3.zip") 
-    os.system("mv ./the-circor-digiscope-phonocardiogram-dataset-1.0.3/training_data ./circor-heart-sound/1.0.3/")
-    os.system("cp ohh.config physionet22/")
+    assert os.system("wget https://physionet.org/static/published-projects/circor-heart-sound/the-circor-digiscope-phonocardiogram-dataset-1.0.3.zip") == 0
+    assert os.system("unzip -q -o the-circor-digiscope-phonocardiogram-dataset-1.0.3.zip") == 0
+    assert os.system("mv ./the-circor-digiscope-phonocardiogram-dataset-1.0.3/training_data ./circor-heart-sound/1.0.3/") == 0
+
     os.chdir('physionet22/')
-    # os.system("python generate_crossvalidation_splits.py")
+    os.system("python generate_crossvalidation_splits.py")
 
     logger.info("Saving ohh.config with the following parameters: \n{}".format(pprint.pformat(parameter_run.to_dict())))
     with open("ohh.config", "w") as ohh_config_fpr:
         json.dump(parameter_run.to_dict(), ohh_config_fpr) 
 
-    os.system("python ./test_code_crossvalidation_splits.py")
+    assert os.system("python ./test_code_crossvalidation_splits.py") == 1
 
     murmur_df = pd.read_csv("../murmur_final_result_current.csv")
     outcome_df = pd.read_csv("../outcome_final_result_current.csv")
@@ -101,12 +115,9 @@ while True:
     outcome_std = outcome_df['Cost'].std()
     update_results(json.dumps(murmur_df.to_dict()), json.dumps(outcome_df.to_dict()), murmur_mean, murmur_std, outcome_std, outcome_mean, parameter_run.parameter_id)
 
-
-    import urllib.request
-    import urllib.parse
-    text = ""
-    text += urllib.parse.quote(open("ohh.config").read() + "\n")
-    text += urllib.parse.quote(open("../murmur_final_result_current.csv").read() + "\n")
-    text += urllib.parse.quote(open("../outcome_final_result_current.csv").read() + "\n")
-    urllib.request.urlopen("https://vorkqcranza3s6f66wloniatvy0duufg.lambda-url.us-east-1.on.aws/?destiny=matheus.ld.araujo@gmail.com&text={}&password=FIYl4lXi6QHMJHth&subject=DoneLambda".format(text))
-
+    text_result = ""
+    text_result += urllib.parse.quote(open("ohh.config").read() + "\n")
+    text_result += urllib.parse.quote(open("../murmur_final_result_current.csv").read() + "\n")
+    text_result += urllib.parse.quote(open("../outcome_final_result_current.csv").read() + "\n")
+    urllib.request.urlopen("https://vorkqcranza3s6f66wloniatvy0duufg.lambda-url.us-east-1.on.aws/?destiny=matheus.ld.araujo@gmail.com&text={}&password=FIYl4lXi6QHMJHth&subject=DoneLambda".format(text_result))
+    os.chdir(dir_path)

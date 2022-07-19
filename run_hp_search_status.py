@@ -26,4 +26,8 @@ db_df = pd.read_sql("SELECT * FROM parameters_search", con = conn)
 logger.info("Completed: {}/{}".format(db_df[~pd.isnull(db_df["mean_murmur"])].shape[0], db_df.shape[0]))
 logger.info("Processing now: {}".format(db_df[~pd.isnull(db_df["start_running_timestamp"]) & pd.isnull(db_df["mean_murmur"])].shape[0]))
 
-logger.info("Top 50 Murmurs:\n{}".format(tabulate(db_df.drop(["murmur_file", "outcome_file"],axis=1).sort_values(by="mean_murmur", ascending=False).head(20))))
+logger.info("Top 50 Murmurs:\n{}".format(tabulate(db_df.drop(["murmur_file", "outcome_file"],axis=1).sort_values(by=["mean_murmur", "start_running_timestamp"], ascending=False).head(20))))
+
+logger.info("Best parameters:")
+best_parameters = db_df.drop(["murmur_file", "outcome_file"],axis=1).sort_values(by="mean_murmur", ascending=False).iloc[0]
+logger.info(pprint.pformat(best_parameters.to_dict()))

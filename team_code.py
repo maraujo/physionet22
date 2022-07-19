@@ -265,6 +265,7 @@ ALGORITHM_HPS = {
 }
 
 if os.path.exists("ohh.config"):
+    OHH_ARGS = json.loads(open("ohh.config", "r").read().strip())
     ALGORITHM_HPS.update(OHH_ARGS)
 
 if  ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl] == "relu":

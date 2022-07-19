@@ -13,7 +13,6 @@ numba==0.48.0
 seaborn==0.11.2
 matplotlib==3.5.1
 imageio-ffmpeg==0.4.5
-boto3==1.24.18
 scikit-image==0.19.2
 scikit-plot==0.3.7
 pandas-profiling==3.0.0
@@ -26,7 +25,6 @@ tensorflow-io-gcs-filesystem==0.26.0
 tensorflow-metadata==1.8.0
 tensorflow-probability==0.16.0
 tensorflow-addons==0.16.1
-awscli==1.25.18
 psutil==5.9.1
 tensorflow-decision-forests==0.2.4
 ipdb==0.13.9

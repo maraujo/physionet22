@@ -49,6 +49,7 @@ from sklearn.utils import class_weight
 import autokeras as ak
 import random
 from tensorflow import feature_column
+import openl3
 
 ORIGINAL_SEED = 42
 tf.keras.utils.set_random_seed(ORIGINAL_SEED)
@@ -580,6 +581,31 @@ def generate_mel_wav_crops_v2(filepath_output_folder):
         del x
         del sr
 
+
+def generate_mel_wav_crops_v3(filepath_output_folder):
+    filepath, output_folder, outcome_folder = filepath_output_folder
+    seconds_window = 2
+    # print(filepath)
+    if output_folder:
+        x, sr_fake = librosa.load(filepath, sr=REAL_SR)
+        sr = REAL_SR
+        duration_seconds = len(x)/sr
+        for end_time in range(seconds_window, math.floor(duration_seconds), seconds_window):
+            # Crop sound
+            start_time = end_time - seconds_window
+            x_cut = x[start_time*sr: start_time*sr + seconds_window*sr]
+            # pil_image = generate_mel_image(x_cut, sr, hop_length=32)
+            output_filepath_prefix = output_folder.rstrip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
+            
+            output_filepath_wav =  output_filepath_prefix + ".wav" 
+            sf.write(output_filepath_wav, x_cut, sr, 'PCM_16')
+            
+            if outcome_folder:
+                outcome_output_filepath_prefix = outcome_folder.rstrip("/") + os.path.sep + os.path.splitext(os.path.basename(filepath))[0] + "_{}_to_{}".format(int(start_time), int(end_time)) 
+                outcome_output_filepath_wav =  outcome_output_filepath_prefix + ".wav" 
+                sf.write(outcome_output_filepath_wav, x_cut, sr, 'PCM_16')
+            
+
 def generate_data_json_file(folder):
   wavfiles = glob.glob(folder.strip("/") + os.path.sep + "*.wav")
   datafiles = []
@@ -1067,6 +1093,27 @@ def load_embs_labels(folder, problem, patient_murmur_outcome_df):
   return embs, labels
 
 
+def get_audio_list_given_folder(folder, run_mode=False):
+    if not run_mode:
+        all_files = pd.Series(glob.glob(folder + "/**/*")).sample(frac=1, replace=False, random_state=42).values.tolist()
+    else:
+        all_files = pd.Series(glob.glob(folder + "/*")).sample(frac=1, replace=False, random_state=42).values.tolist()
+    audio_list = []
+    sr_list = []
+    labels_list = []
+    patient_ids = []
+    for filepath in all_files:
+        if filepath.endswith(".wav"):
+            audio, sr = sf.read(filepath)
+            audio_list.append(audio)
+            sr_list.append(sr)
+            labels_list.append(int("positive" in filepath))
+            if not run_mode:
+                patient_ids.append(filepath.split("/")[2].split("_")[0])
+            else:
+                patient_ids.append(filepath.split("/")[1].split("_")[0])
+    return audio_list, sr_list, np.array(labels_list), patient_ids
+
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
     AUX_FOLDER = "recordings_aux"
@@ -1413,38 +1460,38 @@ def train_challenge_model(data_folder, model_folder, verbose):
         # for args_filepath in tqdm(filepath_output_folder):
         #     generate_mel_wav_crops_v2(args_filepath)
         pool = Pool(processes=(min(WORKERS, 8)))
-        for _ in tqdm(pool.imap(generate_mel_wav_crops_v2, filepath_output_folder), total=len(destiny_folders)):
+        for _ in tqdm(pool.imap(generate_mel_wav_crops_v3, filepath_output_folder), total=len(destiny_folders)):
             pass
         pool.close()
 
     # Clean imgs with noise prediction
+    # noise_murmur_df_list = pd.DataFrame()
+    # for folder in murmur_image_folders:
+    #     try:
+    #         noise_detection_dataset = tf.keras.utils.image_dataset_from_directory(folder, label_mode = None, image_size=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl]), shuffle=False)
+    #     except ValueError:
+    #         continue
+    #     predictions = noise_model_new.predict(noise_detection_dataset)
+    #     noise_murmur_df_list = noise_murmur_df_list.append(pd.DataFrame({"predictions" : predictions.flatten(), "filepath" : noise_detection_dataset.file_paths}))
+    # if noise_murmur_df_list.shape[0] > 0:
+    #     logger.info("Files to evaluated by noise: {}".format(noise_murmur_df_list.shape[0]))
+    #     logger.info("First 10: {}".format(noise_murmur_df_list.head(10)))      
+    #     files_to_exclude = noise_murmur_df_list[noise_murmur_df_list["predictions"] > 0.5]
+    #     logger.info("Clear at most 30\% (arbitrarly chosen) of all training files.")
+    #     limit_max = int(noise_murmur_df_list.shape[0] * 0.3)
+    #     if files_to_exclude.shape[0] > limit_max:
+    #         files_to_exclude = files_to_exclude.sample(limit_max, random_state = 42)
+    #     logger.info("Remove noisy files: {}".format(files_to_exclude.shape[0]))
+    #     if not ALGORITHM_HPS[RUN_TEST_lbl] and files_to_exclude.shape[0] > 0:
+    #         for filepath in tqdm(files_to_exclude["filepath"]):
+    #             logger.info("Noisy file: {}".format(filepath))
+    #             if ALGORITHM_HPS[REMOVE_NOISE_lbl]:
+    #                 os.remove(filepath)
+    #             else:
+    #                 logger.info("Remove noise files canceled.")
+    # else:
+    #     logger.info("No files to remove noise.")
     
-    noise_murmur_df_list = pd.DataFrame()
-    for folder in murmur_image_folders:
-        try:
-            noise_detection_dataset = tf.keras.utils.image_dataset_from_directory(folder, label_mode = None, image_size=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl]), shuffle=False)
-        except ValueError:
-            continue
-        predictions = noise_model_new.predict(noise_detection_dataset)
-        noise_murmur_df_list = noise_murmur_df_list.append(pd.DataFrame({"predictions" : predictions.flatten(), "filepath" : noise_detection_dataset.file_paths}))
-    if noise_murmur_df_list.shape[0] > 0:
-        logger.info("Files to evaluated by noise: {}".format(noise_murmur_df_list.shape[0]))
-        logger.info("First 10: {}".format(noise_murmur_df_list.head(10)))      
-        files_to_exclude = noise_murmur_df_list[noise_murmur_df_list["predictions"] > 0.5]
-        logger.info("Clear at most 30\% (arbitrarly chosen) of all training files.")
-        limit_max = int(noise_murmur_df_list.shape[0] * 0.3)
-        if files_to_exclude.shape[0] > limit_max:
-            files_to_exclude = files_to_exclude.sample(limit_max, random_state = 42)
-        logger.info("Remove noisy files: {}".format(files_to_exclude.shape[0]))
-        if not ALGORITHM_HPS[RUN_TEST_lbl] and files_to_exclude.shape[0] > 0:
-            for filepath in tqdm(files_to_exclude["filepath"]):
-                logger.info("Noisy file: {}".format(filepath))
-                if ALGORITHM_HPS[REMOVE_NOISE_lbl]:
-                    os.remove(filepath)
-                else:
-                    logger.info("Remove noise files canceled.")
-    else:
-        logger.info("No files to remove noise.")
     
     # Dataset for final decision
     all_files = []
@@ -1459,12 +1506,25 @@ def train_challenge_model(data_folder, model_folder, verbose):
     patient_split_df = patient_split_df.drop_duplicates(subset=["patient_id"])
     
     # Load dataset for murmur model training  
+    murmur_model_dataset_train, train_sr_list, murmur_labels_train, patient_id_train =  get_audio_list_given_folder(train_folder_murmur)
+    murmur_murmur_dataset_val, val_sr_list, murmur_labels_val, patient_id_val = get_audio_list_given_folder(val_folder_murmur)
+    murmur_murmur_dataset_test, test_sr_list, murmur_labels_test, patient_id_test = get_audio_list_given_folder(test_folder_murmur) 
     
-    murmur_model_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]) )
-    murmur_murmur_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]) )
-    murmur_murmur_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]), )
-       
-    sklearn_weights_murmur = class_weight.compute_class_weight("balanced",classes=[False, True], y= (np.vstack(murmur_model_dataset_train.map(lambda x,y: y)) == 1).reshape(1,-1)[0].tolist())
+    train_emb_list, train_ts_list = openl3.get_audio_embedding(murmur_model_dataset_train, train_sr_list, hop_size=2, embedding_size=512, batch_size=128)
+    val_emb_list, val_ts_list = openl3.get_audio_embedding(murmur_murmur_dataset_val, val_sr_list, hop_size=2, embedding_size=512, batch_size=128)
+    test_emb_list, test_ts_list = openl3.get_audio_embedding(murmur_murmur_dataset_test, test_sr_list, hop_size=2, embedding_size=512, batch_size=128)
+    
+    train_emb_list =  np.array(train_emb_list).reshape(-1,1024)
+    val_emb_list =  np.array(val_emb_list).reshape(-1,1024)
+    test_emb_list =  np.array(test_emb_list).reshape(-1,1024)
+    
+    
+    
+    murmur_model_dataset_train = tf.data.Dataset.from_tensor_slices((train_emb_list, murmur_labels_train.reshape(-1,1)))
+    murmur_model_dataset_val = tf.data.Dataset.from_tensor_slices((val_emb_list, murmur_labels_val.reshape(-1,1)))
+    murmur_model_dataset_test = tf.data.Dataset.from_tensor_slices((test_emb_list, murmur_labels_test.reshape(-1,1)))
+      
+    sklearn_weights_murmur = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.array(murmur_labels_train == 1).reshape(1,-1)[0].tolist())
     sklearn_weights_murmur = dict(enumerate(sklearn_weights_murmur))
     # sklearn_weights_murmur = {0 :1, 1:1}
     logger.info("Murmur Detection Class Weight Original: {}".format(sklearn_weights_murmur))
@@ -1478,51 +1538,30 @@ def train_challenge_model(data_folder, model_folder, verbose):
         logger.warning("Run: {}".format(runs))
         
         if ALGORITHM_HPS[FINAL_TRAINING_lbl]:
-            murmur_model_dataset_train = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val)
-            murmur_murmur_dataset_val = murmur_murmur_dataset_test
-        
-        if ALGORITHM_HPS[RUN_AUTOKERAS_MURMUR_lbl]:
-            input_node = ak.ImageInput()
-            output_node = ak.XceptionBlock(pretrained=False)(input_node)
-            output_node = ak.SpatialReduction(reduction_type="flatten")(output_node)
-            output_node = ak.DenseBlock(num_layers=1, num_units=64, dropout=0)(output_node)
-            output_node = ak.ClassificationHead(num_classes = 2, dropout=0)(output_node)
+            murmur_model_dataset_train = murmur_model_dataset_train.concatenate(murmur_model_dataset_val)
 
-            clf = OHHAutoModel(
-                inputs=input_node, tuner="bayesian", seed=42, objective=kt.Objective("val_auc", direction="max"), outputs=output_node, overwrite=True, 
-                max_trials=MAX_TRIALS, metrics = get_all_metrics())
-            clf.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, epochs = MURMUR_EPOCHS, class_weight = sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
-                monitor="val_auc",
-                min_delta=0,
-                patience=20,
-                verbose=0,
-                mode="max",
-                baseline=None,
-                restore_best_weights=True
-            )], workers= WORKERS)
-            murmur_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-    
-        else:
-            if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
-                murmur_model_new = get_murmur_model()
-                
-            else:
-                murmur_model_new = tf.keras.models.clone_model(noise_model_new)
-                murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+        
+        
+        if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
+            murmur_model_new = get_murmur_model_openl3()
             
-            murmur_model_new.fit(murmur_model_dataset_train, validation_data=murmur_murmur_dataset_val, 
-                                epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
-                monitor="val_auc",
-                min_delta=0,
-                patience=40,
-                verbose=0,
-                mode="max",
-                baseline=None,
-                restore_best_weights=True
-            )], workers= WORKERS)
+        else:
+            murmur_model_new = tf.keras.models.clone_model(noise_model_new)
+            murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
+        
+        murmur_model_new.fit(murmur_model_dataset_train.batch(32), validation_data=murmur_model_dataset_val.batch(1), 
+                            epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
+            monitor="val_auc",
+            min_delta=0,
+            patience=40,
+            verbose=0,
+            mode="max",
+            baseline=None,
+            restore_best_weights=True
+        )], workers= WORKERS)
         # murmur_model_new.set_weights(noise_model_new.get_weights())
         logger.info("Murmur Model Performance")
-        logger.info(pprint.pformat(murmur_model_new.evaluate(murmur_murmur_dataset_test, return_dict=True)))
+        logger.info(pprint.pformat(murmur_model_new.evaluate(murmur_model_dataset_test.batch(1), return_dict=True)))
         tf.keras.models.save_model(
                 murmur_model_new,
                 os.path.join(model_folder, 'murmur_model.tf'),
@@ -1537,26 +1576,42 @@ def train_challenge_model(data_folder, model_folder, verbose):
         murmur_embedding_model = tf.keras.models.Sequential(murmur_model_new.layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
         
         # Generating embeddings
-        logger.info("Loading all images...")
-        murmur_model_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]), shuffle=False)
-        train_filepaths = murmur_model_dataset_train.file_paths
-        murmur_model_dataset_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-        murmur_model_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl],ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]) , shuffle=False )
-        val_filepaths = murmur_model_dataset_val.file_paths
-        murmur_model_dataset_val.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-        murmur_model_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]), shuffle=False )
-        test_filepaths = murmur_model_dataset_test.file_paths
-        murmur_model_dataset_test.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        logger.info("Loading all embeddings...")
+        # murmur_model_dataset_train = tf.keras.utils.image_dataset_from_directory(train_folder_murmur, label_mode="binary", seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]), shuffle=False)
+        # train_filepaths = murmur_model_dataset_train.file_paths
+        # murmur_model_dataset_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        # murmur_model_dataset_val = tf.keras.utils.image_dataset_from_directory(val_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl],ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]) , shuffle=False )
+        # val_filepaths = murmur_model_dataset_val.file_paths
+        # murmur_model_dataset_val.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        # murmur_model_dataset_test = tf.keras.utils.image_dataset_from_directory(test_folder_murmur, label_mode="binary", batch_size=1, seed=42, image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]), shuffle=False )
+        # test_filepaths = murmur_model_dataset_test.file_paths
+        # murmur_model_dataset_test.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
         # murmur_model_dataset_all = murmur_model_dataset_train.concatenate(murmur_murmur_dataset_val).concatenate(murmur_murmur_dataset_test)
-        # all_murmur_files_series = pd.Series(glob.glob(os.path.join(train_folder_murmur, "**/*.png")) + glob.glob(os.path.join(val_folder_murmur, "**/*.png")) + glob.glob(os.path.join(test_folder_murmur, "**/*.png")))
-        # all_murmur_files_images = all_murmur_files_series.apply(load_image_array)
-        logger.info("Predicting for all images...")
-        all_file_paths = pd.Series(train_filepaths + val_filepaths + test_filepaths)
-        all_murmur_files_embs = np.vstack((murmur_embedding_model.predict(murmur_model_dataset_train), murmur_embedding_model.predict(murmur_model_dataset_val), murmur_embedding_model.predict(murmur_model_dataset_test)))
-        # del all_murmur_files_images
-        patient_ids = all_file_paths.apply(lambda x: x.split("/")[2].split("_")[0])
-        embs_df = pd.DataFrame({"filepath"  : all_file_paths, "embs" : all_murmur_files_embs.tolist(), "patient_id": patient_ids})
+        # # all_murmur_files_series = pd.Series(glob.glob(os.path.join(train_folder_murmur, "**/*.png")) + glob.glob(os.path.join(val_folder_murmur, "**/*.png")) + glob.glob(os.path.join(test_folder_murmur, "**/*.png")))
+        # # all_murmur_files_images = all_murmur_files_series.apply(load_image_array)
+        # logger.info("Predicting for all images...")
+        # all_file_paths = pd.Series(train_filepaths + val_filepaths + test_filepaths)
+        # all_murmur_files_embs = np.vstack((murmur_embedding_model.predict(murmur_model_dataset_train), murmur_embedding_model.predict(murmur_model_dataset_val), murmur_embedding_model.predict(murmur_model_dataset_test)))
+        # # del all_murmur_files_images
+        # patient_ids = all_file_paths.apply(lambda x: x.split("/")[2].split("_")[0])
+        # embs_df = pd.DataFrame({"filepath"  : all_file_paths, "embs" : all_murmur_files_embs.tolist(), "patient_id": patient_ids})
         
+        embs_train_input = murmur_embedding_model.predict(train_emb_list)
+        embs_label_train_input = murmur_labels_train
+        embs_patient_id_train_input = patient_id_train
+        embs_val_input = murmur_embedding_model.predict(val_emb_list)
+        embs_label_val_input = murmur_labels_val
+        embs_patient_id_val_input = patient_id_val
+        embs_test_input = murmur_embedding_model.predict(test_emb_list)
+        embs_label_test_input = murmur_labels_test
+        embs_patient_id_test_input = patient_id_test
+        
+        murmur_model_dataset_all = np.concatenate([embs_train_input, embs_val_input, embs_test_input])
+        murmur_patient_ids_all = np.concatenate([embs_patient_id_train_input, embs_patient_id_val_input, embs_patient_id_test_input])
+        murmur_label_all = np.concatenate([embs_label_train_input, embs_label_val_input, embs_label_test_input])
+        embs_df = pd.DataFrame({"embs" : murmur_model_dataset_all.tolist(), "patient_id": murmur_patient_ids_all})
+        
+        logger.info("Separeting sets for murmur decision...")
         embs_train = []
         embs_label_train = []
         embs_patient_id_train = []
@@ -1566,7 +1621,6 @@ def train_challenge_model(data_folder, model_folder, verbose):
         embs_test = []
         embs_label_test = []
         embs_patient_id_test = []
-        logger.info("Separeting sets for murmur decision...")
         for patient_id, patient_embs in tqdm(embs_df.groupby("patient_id")):
             patient_row = patient_split_df[patient_split_df["patient_id"] == patient_id].iloc[0]
             patient_embs_df = patient_embs["embs"].sample(frac=1, random_state=42)
@@ -1595,6 +1649,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         # generate_patient_embeddings_folder_v2(patient_id, patient_row["split"], patient_row["label"], patient_embs["embs"])
         # embs_train, labels_train = load_embs_labels(train_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
         # embs_val, labels_val = load_embs_labels(val_embs_folder_murmur, "murmur", patient_murmur_outcome_df)
+
         logger.info("Loading sets for murmur decision...")
         embs_train_original = cp.deepcopy(embs_train)
         embs_val_original = cp.deepcopy(embs_train)
@@ -1836,8 +1891,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
     # model.run_eagerly
     # FFN Decision
 
-    train_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1))).batch(64, drop_remainder=True)
-    val_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(val_input_X), val_input_y.reshape(-1,1))).batch(64, drop_remainder=True)
+    train_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(train_input_X), train_input_y.reshape(-1,1))).batch(8, drop_remainder=True)
+    val_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(val_input_X), val_input_y.reshape(-1,1))).batch(8, drop_remainder=True)
     test_outcome = tf.data.Dataset.from_tensor_slices((np.vstack(test_input_X), test_input_y.reshape(-1,1))).batch(1)
     sklearn_weights_outcome_decision = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.vstack(train_outcome.map(lambda x,y: y)).flatten().tolist())
     sklearn_weights_outcome_decision = dict(enumerate(sklearn_weights_outcome_decision))
@@ -1905,6 +1960,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
     else:
         if verbose >= 1:
             logger.error("THRESHOLD NOT CHANGED OUTCOME!")
+
     #XGBoost
     # hyperparameter_grid = {
     #     'n_estimators': [100, 400, 800],
@@ -2030,6 +2086,7 @@ def process_recordings(recording):
 def run_challenge_model(model, data, recordings, verbose):
     AUX_FOLDER = "recordings_aux"
     AUX_IMGS_FOLDER = "images_aux"
+    AUX_IMGS_OUTCOME_FOLDER = "images_aux_outcome"
     
     murmur_classes = ['Present', 'Unknown', 'Absent']
     num_murmur_classes = len(murmur_classes)
@@ -2038,10 +2095,11 @@ def run_challenge_model(model, data, recordings, verbose):
     
     os.makedirs(AUX_FOLDER, exist_ok=True)
     os.makedirs(AUX_IMGS_FOLDER, exist_ok=True)
+    os.makedirs(AUX_IMGS_OUTCOME_FOLDER, exist_ok=True)
     
     clean_folder(AUX_IMGS_FOLDER)
     clean_folder(AUX_FOLDER)
-        
+    clean_folder(AUX_IMGS_OUTCOME_FOLDER)
     
     for recording in recordings:
         recording = recording / 2 ** (16 - 1) # Normalize as: https://stackoverflow.com/questions/50062358/difference-between-load-of-librosa-and-read-of-scipy-io-wavfile
@@ -2056,27 +2114,32 @@ def run_challenge_model(model, data, recordings, verbose):
     clean_frequency_folder(AUX_FOLDER)
     clean_files = glob.glob(os.path.join(AUX_FOLDER, "*_clean.wav"))
     for clean_file in clean_files:
-        generate_mel_wav_crops_v2((clean_file, AUX_IMGS_FOLDER))
+        generate_mel_wav_crops_v3((clean_file, AUX_IMGS_FOLDER, AUX_IMGS_OUTCOME_FOLDER))
 
-    imgs_to_filter = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=(int(model[NOISE_IMAGE_SIZE_lbl]), int(model[NOISE_IMAGE_SIZE_lbl])))
-    imgs_noise_prediction = model["noise_model"].predict(imgs_to_filter)
-    imgs_noise_df = pd.DataFrame({"imgs_path":imgs_to_filter.file_paths, "noise_prob" : imgs_noise_prediction.flatten()})
-    imgs_clean = imgs_noise_df[imgs_noise_df["noise_prob"] < 0.5]
-    imgs_noisy = imgs_noise_df[~imgs_noise_df["imgs_path"].isin(imgs_clean["imgs_path"])]
-    if imgs_clean.shape[0] == 0:
-        logger.info("No clean sound. By default abnormal.")
-        labels = [1,0,0] + [1, 0]
-        probabilities = [1,0,0] + [1, 0]
-        classes = murmur_classes + outcome_classes
-        return classes, labels, probabilities
     
-    # Delete noisy imgs    
-    # imgs_noisy["imgs_path"].apply(lambda x: os.remove(x))
+    if ALGORITHM_HPS[REMOVE_NOISE_lbl]:
+        imgs_to_filter = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=(int(model[NOISE_IMAGE_SIZE_lbl]), int(model[NOISE_IMAGE_SIZE_lbl])))
+        imgs_noise_prediction = model["noise_model"].predict(imgs_to_filter)
+        imgs_noise_df = pd.DataFrame({"imgs_path":imgs_to_filter.file_paths, "noise_prob" : imgs_noise_prediction.flatten()})
+        imgs_clean = imgs_noise_df[imgs_noise_df["noise_prob"] < 0.5]
+        imgs_noisy = imgs_noise_df[~imgs_noise_df["imgs_path"].isin(imgs_clean["imgs_path"])]
+        if imgs_clean.shape[0] == 0:
+            logger.info("No clean sound. By default abnormal.")
+            labels = [1,0,0] + [1, 0]
+            probabilities = [1,0,0] + [1, 0]
+            classes = murmur_classes + outcome_classes
+            return classes, labels, probabilities
+        
+        # Delete noisy imgs    
+        imgs_noisy["imgs_path"].apply(lambda x: os.remove(x))
     
     # Get murmur embeddings
+    murmur_model_dataset, sr, _, patient_id =  get_audio_list_given_folder(AUX_IMGS_FOLDER, run_mode=True)
+    emb_list, ts_list = openl3.get_audio_embedding(murmur_model_dataset, sr, hop_size=2, embedding_size=512, batch_size=32)
     murmur_embeddings_model = tf.keras.models.Sequential(model["murmur_model"].layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
-    imgs_to_emb = tf.keras.utils.image_dataset_from_directory(AUX_IMGS_FOLDER, labels = None, image_size=(int(model[MURMUR_IMAGE_SIZE_lbl]), int(model[MURMUR_IMAGE_SIZE_lbl])))
-    embs = murmur_embeddings_model.predict(imgs_to_emb)
+    emb_list =  np.array(emb_list).reshape(-1,1024)
+    embs = murmur_embeddings_model.predict(emb_list)
+    
     embs_df = pd.DataFrame(embs).sample(frac=1, random_state=42)
 
     if embs_df.shape[0] < model[EMBDS_PER_PATIENTS_lbl]:
@@ -2191,10 +2254,6 @@ def save_challenge_model(model_folder, noise_model, murmur_model, murmur_decisio
         "patient_stds" : patient_stds
     }).to_pickle(os.path.join(model_folder, "models_info.pickle"))
     
-    if OHH_ARGS and ("AWS_ID" in OHH_ARGS):
-        destinypath = "/tmp/models-{}.tar.gz".format(str(uuid.uuid4()))
-        os.system("tar -cvzf {} {}".format(destinypath, model_folder))
-        response = s3.upload_file(destinypath, "1hh-algorithm-dev", "models/" + os.path.basename(destinypath))
 
 
 def get_murmur_decision_model_pretrained(murmur_model):
@@ -2252,6 +2311,26 @@ def get_murmur_decision_model_configs():
     murmur_decision_config = {'name': 'model', 'layers': [{'class_name': 'InputLayer', 'config': {'batch_input_shape': (None, ALGORITHM_HPS[EMBS_SIZE_lbl] * ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]), 'dtype': 'float32', 'sparse': False, 'ragged': False, 'name': 'input_1'}, 'name': 'input_1', 'inbound_nodes': []}, {'class_name': 'Custom>CastToFloat32', 'config': {'name': 'cast_to_float32', 'trainable': True, 'dtype': 'float32'}, 'name': 'cast_to_float32', 'inbound_nodes': [[['input_1', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense', 'trainable': True, 'dtype': 'float32', 'units': 1024, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense', 'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]]}, {'class_name': 'ReLU', 'config': {'name': 're_lu', 'trainable': True, 'dtype': 'float32', 'max_value': None, 'negative_slope': array(0., dtype=float32), 'threshold': array(0., dtype=float32)}, 'name': 're_lu', 'inbound_nodes': [[['dense', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense_1', 'trainable': True, 'dtype': 'float32', 'units': 1, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense_1', 'inbound_nodes': [[['re_lu', 0, 0, {}]]]}, {'class_name': 'Activation', 'config': {'name': 'classification_head_1', 'trainable': True, 'dtype': 'float32', 'activation': 'sigmoid'}, 'name': 'classification_head_1', 'inbound_nodes': [[['dense_1', 0, 0, {}]]]}], 'input_layers': [['input_1', 0, 0]], 'output_layers': [['classification_head_1', 0, 0]]}
     return murmur_decision_config
 
+def get_murmur_model_openl3():
+    murmur_model = tf.keras.models.Sequential()
+    murmur_model.add(tf.keras.layers.InputLayer(input_shape=(1024,)))
+    murmur_model.add(CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}))
+    if ALGORITHM_HPS[IS_DROPOUT_IN_MURMUR_lbl]:
+            murmur_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
+    for _ in range(ALGORITHM_HPS[N_MURMUR_LAYERS_lbl]):
+        murmur_model.add(tf.keras.layers.Dense(ALGORITHM_HPS[N_MURMUR_CNN_NEURONS_LAYERS_lbl], activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization()))
+        if ALGORITHM_HPS[IS_DROPOUT_IN_MURMUR_lbl]:
+            murmur_model.add(tf.keras.layers.Dropout(ALGORITHM_HPS[DROPOUT_VALUE_IN_MURMUR_lbl]))
+    murmur_model.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization()))
+    murmur_model.add(tf.keras.layers.BatchNormalization())
+    murmur_model.add(tf.keras.layers.Dense(1, activation='sigmoid', kernel_initializer=generate_kernel_initialization()))
+                
+    optimizer = tf.keras.optimizers.Adam(
+                       learning_rate=ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl]
+                    )  
+    murmur_model.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
+    return murmur_model
+    
 def get_murmur_model():
     # return ak.ImageClassifier()
     if ALGORITHM_HPS[IS_MURMUR_MODEL_XCEPTION_lbl]:

@@ -51,6 +51,7 @@ import random
 from tensorflow import feature_column
 import openl3
 
+import tensorflow as tf
 ORIGINAL_SEED = 42
 tf.keras.utils.set_random_seed(ORIGINAL_SEED)
 tf.config.run_functions_eagerly(True)
@@ -106,6 +107,15 @@ import tensorflow_decision_forests as tfdf
 from tensorboard.plugins.hparams import api as hpar
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 
+
+gpus = tf.config.list_physical_devices('GPU')
+if len(gpus) > 0:
+    logger.info("Allocating 50\% of GPU for openl3")
+    tf.config.gpu.set_per_process_memory_fraction(0.5)
+    tf.config.gpu.set_per_process_memory_growth(True)
+
+input_repr, content_type, embedding_size = 'mel128', 'music', 512
+model_kapre = openl3.models.load_audio_embedding_model(input_repr, content_type, embedding_size)
 demographics = ['pregnancy_status', 'weight', 'height', 'sex', 'bmi', 'Child', 'Adolescent', 'Infant']
 age_encoding = np.array(['Child', 'Adolescent', 'Infant'])
 
@@ -1092,6 +1102,20 @@ def load_embs_labels(folder, problem, patient_murmur_outcome_df):
     labels.append(label)
   return embs, labels
 
+def get_openl3_embeddings_given_filepaths(filepaths):
+    openl3_aux_folder = "openl3_aux_folder"
+    clean_folder(openl3_aux_folder)
+    if not os.path.exists(openl3_aux_folder):
+        os.mkdir(openl3_aux_folder)
+    os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder".format(" ".join(filepaths)))
+    embds_files = glob.glob(openl3_aux_folder + "/*.npz")
+    embds_df = pd.DataFrame({"basename" : pd.Series(embds_files).apply(os.path.basename).apply(lambda x: os.path.splitext(x)[0]), "embds": pd.Series(embds_files).apply(lambda x: np.load(x)["embedding"])})
+    embds_df = embds_df.set_index("basename")
+    basenames_original = pd.Series(filepaths).apply(os.path.basename).apply(lambda x: os.path.splitext(x)[0])
+    embds_to_return = embds_df.loc[basenames_original].embds.values.tolist()
+    shutil.rmtree(openl3_aux_folder)
+    return embds_to_return
+    
 
 def get_audio_list_given_folder(folder, run_mode=False):
     if not run_mode:
@@ -1099,6 +1123,7 @@ def get_audio_list_given_folder(folder, run_mode=False):
     else:
         all_files = pd.Series(glob.glob(folder + "/*")).sample(frac=1, replace=False, random_state=42).values.tolist()
     audio_list = []
+    audio_path_list = []
     sr_list = []
     labels_list = []
     patient_ids = []
@@ -1108,11 +1133,12 @@ def get_audio_list_given_folder(folder, run_mode=False):
             audio_list.append(audio)
             sr_list.append(sr)
             labels_list.append(int("positive" in filepath))
+            audio_path_list.append(filepath)
             if not run_mode:
                 patient_ids.append(filepath.split("/")[2].split("_")[0])
             else:
                 patient_ids.append(filepath.split("/")[1].split("_")[0])
-    return audio_list, sr_list, np.array(labels_list), patient_ids
+    return audio_path_list, audio_list, sr_list, np.array(labels_list), patient_ids
 
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
@@ -1506,14 +1532,18 @@ def train_challenge_model(data_folder, model_folder, verbose):
     patient_split_df = patient_split_df.drop_duplicates(subset=["patient_id"])
     
     # Load dataset for murmur model training  
-    murmur_model_dataset_train, train_sr_list, murmur_labels_train, patient_id_train =  get_audio_list_given_folder(train_folder_murmur)
-    murmur_murmur_dataset_val, val_sr_list, murmur_labels_val, patient_id_val = get_audio_list_given_folder(val_folder_murmur)
-    murmur_murmur_dataset_test, test_sr_list, murmur_labels_test, patient_id_test = get_audio_list_given_folder(test_folder_murmur) 
+    murmur_model_dataset_paths_train, _, train_sr_list, murmur_labels_train, patient_id_train =  get_audio_list_given_folder(train_folder_murmur)
+    murmur_model_dataset_paths_val, _, val_sr_list, murmur_labels_val, patient_id_val = get_audio_list_given_folder(val_folder_murmur)
+    murmur_model_dataset_paths_test, _, test_sr_list, murmur_labels_test, patient_id_test = get_audio_list_given_folder(test_folder_murmur) 
     
-    train_emb_list, train_ts_list = openl3.get_audio_embedding(murmur_model_dataset_train, train_sr_list, hop_size=2, embedding_size=512, batch_size=128)
-    val_emb_list, val_ts_list = openl3.get_audio_embedding(murmur_murmur_dataset_val, val_sr_list, hop_size=2, embedding_size=512, batch_size=128)
-    test_emb_list, test_ts_list = openl3.get_audio_embedding(murmur_murmur_dataset_test, test_sr_list, hop_size=2, embedding_size=512, batch_size=128)
-    
+    logger.info("Getting openl3 embedding")
+    train_emb_list = get_openl3_embeddings_given_filepaths(murmur_model_dataset_paths_train)
+    val_emb_list = get_openl3_embeddings_given_filepaths(murmur_model_dataset_paths_val)
+    test_emb_list = get_openl3_embeddings_given_filepaths(murmur_model_dataset_paths_test)
+    # train_emb_list, train_ts_list = openl3.get_audio_embedding(murmur_model_dataset_train, train_sr_list, hop_size=2, embedding_size=512, batch_size=64)
+    # val_emb_list, val_ts_list = openl3.get_audio_embedding(murmur_murmur_dataset_val, val_sr_list, hop_size=2, embedding_size=512, batch_size=64)
+    # test_emb_list, test_ts_list = openl3.get_audio_embedding(murmur_murmur_dataset_test, test_sr_list, hop_size=2, embedding_size=512, batch_size=64)
+
     train_emb_list =  np.array(train_emb_list).reshape(-1,1024)
     val_emb_list =  np.array(val_emb_list).reshape(-1,1024)
     test_emb_list =  np.array(test_emb_list).reshape(-1,1024)
@@ -1549,7 +1579,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             murmur_model_new = tf.keras.models.clone_model(noise_model_new)
             murmur_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate':ALGORITHM_HPS[LEARNING_RATE_MURMUR_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), loss="binary_crossentropy", metrics=get_all_metrics())
         
-        murmur_model_new.fit(murmur_model_dataset_train.batch(32), validation_data=murmur_model_dataset_val.batch(1), 
+        murmur_model_new.fit(murmur_model_dataset_train.batch(64), validation_data=murmur_model_dataset_val.batch(64), 
                             epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
             monitor="val_auc",
             min_delta=0,
@@ -2128,8 +2158,8 @@ def run_challenge_model(model, data, recordings, verbose):
         imgs_noisy["imgs_path"].apply(lambda x: os.remove(x))
     
     # Get murmur embeddings
-    murmur_model_dataset, sr, _, patient_id =  get_audio_list_given_folder(AUX_IMGS_FOLDER, run_mode=True)
-    emb_list, ts_list = openl3.get_audio_embedding(murmur_model_dataset, sr, hop_size=2, embedding_size=512, batch_size=32)
+    murmur_model_paths, murmur_model_audio, sr, _, patient_id =  get_audio_list_given_folder(AUX_IMGS_FOLDER, run_mode=True)
+    emb_list, ts_list = openl3.get_audio_embedding(murmur_model_audio, sr, model_kapre, hop_size=2, batch_size=32)
     murmur_embeddings_model = tf.keras.models.Sequential(model["murmur_model"].layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
     emb_list =  np.array(emb_list).reshape(-1,1024)
     embs = murmur_embeddings_model.predict(emb_list)

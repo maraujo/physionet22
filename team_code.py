@@ -1779,14 +1779,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
         if thresholds_df.shape[0] > 0:
             thresholds_df = thresholds_df.set_index("thresholds")
             thresholds_df.plot()
-            plt.savefig("thresholds.png")
-            if thresholds_df.shape[0] > 5:
-                y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
-                x = thresholds_df.index.values
-                kn = KneeLocator(x, y, curve='convex', direction='decreasing')
-                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee if kn.knee else x[0]
-            else:
-                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
+            ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["cwa"].idxmax()
+                
             logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
             converged = True
         else:

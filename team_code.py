@@ -113,7 +113,7 @@ if len(gpus) > 0:
     logger.info("Allocating 50\% of GPU for openl3")
     for gpu in gpus:
       tf.config.experimental.set_memory_growth(gpu, True)
-      tf.config.set_logical_device_configuration(gpu, [tf.config.LogicalDeviceConfiguration(memory_limit=1024)])
+      tf.config.set_logical_device_configuration(gpu, [tf.config.LogicalDeviceConfiguration(memory_limit=8000)])
 
 input_repr, content_type, embedding_size = 'mel128', 'music', 512
 model_kapre = openl3.models.load_audio_embedding_model(input_repr, content_type, embedding_size)

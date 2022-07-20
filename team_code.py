@@ -1111,9 +1111,9 @@ def get_openl3_embeddings_given_filepaths(filepaths, verbose=False):
     # Necessary due to maximum arg size in linux
     for filepaths_chunks in np.array_split(filepaths, 1000):
         if verbose:
-            os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder --quiet".format(" ".join(filepaths_chunks)))
+            os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder  --audio-batch-size 256".format(" ".join(filepaths_chunks)))
         else:
-            os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder".format(" ".join(filepaths_chunks)))
+            os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder  --audio-batch-size 256 --quiet".format(" ".join(filepaths_chunks)))
     embds_files = glob.glob(openl3_aux_folder + "/*.npz")
     embds_df = pd.DataFrame({"basename" : pd.Series(embds_files).apply(os.path.basename).apply(lambda x: os.path.splitext(x)[0]), "embds": pd.Series(embds_files).apply(lambda x: np.load(x)["embedding"])})
     embds_df = embds_df.set_index("basename")

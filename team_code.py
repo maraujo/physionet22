@@ -1109,7 +1109,8 @@ def get_openl3_embeddings_given_filepaths(filepaths, verbose=False):
     if not os.path.exists(openl3_aux_folder):
         os.mkdir(openl3_aux_folder)
     # Necessary due to maximum arg size in linux
-    for filepaths_chunks in np.array_split(filepaths, 1000):
+    splits = int(np.ceil(len(filepaths) / 1000))
+    for filepaths_chunks in tqdm(np.array_split(filepaths, splits)):
         if verbose:
             os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder  --audio-batch-size 256".format(" ".join(filepaths_chunks)))
         else:
@@ -1562,7 +1563,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
       
     sklearn_weights_murmur = class_weight.compute_class_weight("balanced",classes=[False, True], y= np.array(murmur_labels_train == 1).reshape(1,-1)[0].tolist())
     sklearn_weights_murmur = dict(enumerate(sklearn_weights_murmur))
-    # sklearn_weights_murmur = {0 :1, 1:1}
+    # sklearn_weights_murmur = {0 i, 1:1}
     logger.info("Murmur Detection Class Weight Original: {}".format(sklearn_weights_murmur))
     sklearn_weights_murmur[1] *= ALGORITHM_HPS[class_weight_murmur_lbl]
     logger.info("Murmur Detection Class Weight Adjusted: {}".format(sklearn_weights_murmur))

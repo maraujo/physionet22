@@ -111,8 +111,9 @@ from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 gpus = tf.config.list_physical_devices('GPU')
 if len(gpus) > 0:
     logger.info("Allocating 50\% of GPU for openl3")
-    tf.config.gpu.set_per_process_memory_fraction(0.5)
-    tf.config.gpu.set_per_process_memory_growth(True)
+    for gpu in gpus:
+      tf.config.experimental.set_memory_growth(gpu, True)
+      tf.config.set_logical_device_configuration(gpu, [tf.config.LogicalDeviceConfiguration(memory_limit=1024)])
 
 input_repr, content_type, embedding_size = 'mel128', 'music', 512
 model_kapre = openl3.models.load_audio_embedding_model(input_repr, content_type, embedding_size)
@@ -1102,12 +1103,17 @@ def load_embs_labels(folder, problem, patient_murmur_outcome_df):
     labels.append(label)
   return embs, labels
 
-def get_openl3_embeddings_given_filepaths(filepaths):
+def get_openl3_embeddings_given_filepaths(filepaths, verbose=False):
     openl3_aux_folder = "openl3_aux_folder"
     clean_folder(openl3_aux_folder)
     if not os.path.exists(openl3_aux_folder):
         os.mkdir(openl3_aux_folder)
-    os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder".format(" ".join(filepaths)))
+    # Necessary due to maximum arg size in linux
+    for filepaths_chunks in np.array_split(filepaths, 1000):
+        if verbose:
+            os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder --quiet".format(" ".join(filepaths_chunks)))
+        else:
+            os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder".format(" ".join(filepaths_chunks)))
     embds_files = glob.glob(openl3_aux_folder + "/*.npz")
     embds_df = pd.DataFrame({"basename" : pd.Series(embds_files).apply(os.path.basename).apply(lambda x: os.path.splitext(x)[0]), "embds": pd.Series(embds_files).apply(lambda x: np.load(x)["embedding"])})
     embds_df = embds_df.set_index("basename")
@@ -1537,9 +1543,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     murmur_model_dataset_paths_test, _, test_sr_list, murmur_labels_test, patient_id_test = get_audio_list_given_folder(test_folder_murmur) 
     
     logger.info("Getting openl3 embedding")
-    train_emb_list = get_openl3_embeddings_given_filepaths(murmur_model_dataset_paths_train)
-    val_emb_list = get_openl3_embeddings_given_filepaths(murmur_model_dataset_paths_val)
-    test_emb_list = get_openl3_embeddings_given_filepaths(murmur_model_dataset_paths_test)
+    train_emb_list = get_openl3_embeddings_given_filepaths(murmur_model_dataset_paths_train, verbose=verbose)
+    val_emb_list = get_openl3_embeddings_given_filepaths(murmur_model_dataset_paths_val, verbose=verbose)
+    test_emb_list = get_openl3_embeddings_given_filepaths(murmur_model_dataset_paths_test, verbose=verbose)
     # train_emb_list, train_ts_list = openl3.get_audio_embedding(murmur_model_dataset_train, train_sr_list, hop_size=2, embedding_size=512, batch_size=64)
     # val_emb_list, val_ts_list = openl3.get_audio_embedding(murmur_murmur_dataset_val, val_sr_list, hop_size=2, embedding_size=512, batch_size=64)
     # test_emb_list, test_ts_list = openl3.get_audio_embedding(murmur_murmur_dataset_test, test_sr_list, hop_size=2, embedding_size=512, batch_size=64)
@@ -2159,7 +2165,7 @@ def run_challenge_model(model, data, recordings, verbose):
     
     # Get murmur embeddings
     murmur_model_paths, murmur_model_audio, sr, _, patient_id =  get_audio_list_given_folder(AUX_IMGS_FOLDER, run_mode=True)
-    emb_list, ts_list = openl3.get_audio_embedding(murmur_model_audio, sr, model_kapre, hop_size=2, batch_size=32)
+    emb_list, ts_list = openl3.get_audio_embedding(murmur_model_audio, sr, model_kapre, hop_size=2, batch_size=32, center=False, verbose=verbose > 0)
     murmur_embeddings_model = tf.keras.models.Sequential(model["murmur_model"].layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
     emb_list =  np.array(emb_list).reshape(-1,1024)
     embs = murmur_embeddings_model.predict(emb_list)

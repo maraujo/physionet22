@@ -21,21 +21,7 @@ logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 PATIENCE_DAYS = 2
 github_token = "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"
 
-def update_timestamp(timestamp, parameter_id):
-    with engine.connect() as conn:
-        if timestamp == None:
-            sql_update_timestamp = "UPDATE parameters_search SET start_running_timestamp = NULL WHERE parameter_id = '{}';".format(parameter_id)
-        else:
-            sql_update_timestamp = "UPDATE parameters_search SET start_running_timestamp = '{}' WHERE parameter_id = '{}';".format(timestamp, parameter_id)
-        res = conn.execute(text(sql_update_timestamp))
-        logger.info("Updating timestamp: {} - {}".format(res, sql_update_timestamp))
 
-
-def update_results(murmur_file, outcome_file, mean_murmur, std_murmur, std_outcome, mean_outcome, parameter_id):
-    with engine.connect() as conn:
-        sql_update_timestamp = "UPDATE parameters_search SET murmur_file = '{}', outcome_file = '{}', mean_murmur = '{}', std_murmur='{}', std_outcome='{}', mean_outcome='{}'  WHERE parameter_id = '{}';".format(murmur_file, outcome_file, mean_murmur, std_murmur, std_outcome, mean_outcome, parameter_id)
-        res = conn.execute(text(sql_update_timestamp))
-        logger.info("Updating timestamp: {}".format(res))
 
 
 os.system("curl --create-dirs -o $HOME/.postgresql/root.crt -O https://cockroachlabs.cloud/clusters/6cadd36b-9892-418c-88c7-64a5781755ec/cert")
@@ -64,7 +50,7 @@ os.system("rm -r ./circor-heart-sound/")
 
 os.system("mkdir -p ./cross-validation-data-1-0-3/")
 os.system("mkdir -p ./circor-heart-sound/1.0.3/")
-os.system("git clone --branch matheus https://matheus:{}@github.com/maraujo/physionet22.git".format(github_token))
+os.system("git clone --branch projectx https://matheus:{}@github.com/maraujo/physionet22.git".format(github_token))
 assert os.system("pip install -r ./physionet22/requirements.txt") == 0
 assert os.system("pip install tensorflow==2.8.2") == 0
 

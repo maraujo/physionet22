@@ -1112,9 +1112,9 @@ def get_openl3_embeddings_given_filepaths(filepaths, verbose=False):
     splits = int(np.ceil(len(filepaths) / 1000))
     for filepaths_chunks in tqdm(np.array_split(filepaths, splits)):
         if verbose:
-            os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder  --audio-batch-size 256".format(" ".join(filepaths_chunks)))
+            os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder  --audio-batch-size 512".format(" ".join(filepaths_chunks)))
         else:
-            os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder  --audio-batch-size 256 --quiet".format(" ".join(filepaths_chunks)))
+            os.system("openl3 audio {} --content-type music --input-repr mel128 --audio-embedding-size 512 --audio-hop-size 2 --no-audio-centering --overwrite --output-dir openl3_aux_folder  --audio-batch-size 512 --quiet".format(" ".join(filepaths_chunks)))
     embds_files = glob.glob(openl3_aux_folder + "/*.npz")
     embds_df = pd.DataFrame({"basename" : pd.Series(embds_files).apply(os.path.basename).apply(lambda x: os.path.splitext(x)[0]), "embds": pd.Series(embds_files).apply(lambda x: np.load(x)["embedding"])})
     embds_df = embds_df.set_index("basename")
@@ -2342,7 +2342,7 @@ def get_murmur_decision_model_configs():
     murmur_decision_config = {'name': 'model', 'layers': [{'class_name': 'InputLayer', 'config': {'batch_input_shape': (None, ALGORITHM_HPS[EMBS_SIZE_lbl] * ALGORITHM_HPS[EMBDS_PER_PATIENTS_lbl]), 'dtype': 'float32', 'sparse': False, 'ragged': False, 'name': 'input_1'}, 'name': 'input_1', 'inbound_nodes': []}, {'class_name': 'Custom>CastToFloat32', 'config': {'name': 'cast_to_float32', 'trainable': True, 'dtype': 'float32'}, 'name': 'cast_to_float32', 'inbound_nodes': [[['input_1', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense', 'trainable': True, 'dtype': 'float32', 'units': 1024, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense', 'inbound_nodes': [[['cast_to_float32', 0, 0, {}]]]}, {'class_name': 'ReLU', 'config': {'name': 're_lu', 'trainable': True, 'dtype': 'float32', 'max_value': None, 'negative_slope': array(0., dtype=float32), 'threshold': array(0., dtype=float32)}, 'name': 're_lu', 'inbound_nodes': [[['dense', 0, 0, {}]]]}, {'class_name': 'Dense', 'config': {'name': 'dense_1', 'trainable': True, 'dtype': 'float32', 'units': 1, 'activation': 'linear', 'use_bias': True, 'kernel_initializer': {'class_name': 'GlorotUniform', 'config': {'seed': 42}}, 'bias_initializer': {'class_name': 'Zeros', 'config': {}}, 'kernel_regularizer': None, 'bias_regularizer': None, 'activity_regularizer': None, 'kernel_constraint': None, 'bias_constraint': None}, 'name': 'dense_1', 'inbound_nodes': [[['re_lu', 0, 0, {}]]]}, {'class_name': 'Activation', 'config': {'name': 'classification_head_1', 'trainable': True, 'dtype': 'float32', 'activation': 'sigmoid'}, 'name': 'classification_head_1', 'inbound_nodes': [[['dense_1', 0, 0, {}]]]}], 'input_layers': [['input_1', 0, 0]], 'output_layers': [['classification_head_1', 0, 0]]}
     return murmur_decision_config
 
-def get_murmur_model_openl3():
+def nget_murmur_model_openl3():
     murmur_model = tf.keras.models.Sequential()
     murmur_model.add(tf.keras.layers.InputLayer(input_shape=(1024,)))
     murmur_model.add(CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}))

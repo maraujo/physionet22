@@ -46,11 +46,12 @@ os.system("rm -r ./cross-validation-data-1-0-3/")
 os.system("rm -r ./circor-heart-sound/")
 os.system("rm ./murmur_final_result_current.csv")
 os.system("rm ./outcome_final_result_current.csv")
+os.system("rm -r ./physionet22/")
 os.system("rm -r ./circor-heart-sound/")
 
 os.system("mkdir -p ./cross-validation-data-1-0-3/")
 os.system("mkdir -p ./circor-heart-sound/1.0.3/")
-os.system("git clone --branch projectx https://matheus:{}@github.com/maraujo/physionet22.git".format(github_token))
+os.system("git clone --branch matheus https://matheus:{}@github.com/maraujo/physionet22.git".format(github_token))
 assert os.system("pip install -r ./physionet22/requirements.txt") == 0
 assert os.system("pip install tensorflow==2.8.2") == 0
 

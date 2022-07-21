@@ -83,6 +83,7 @@ while True:
     #Cleaning from previous run    
     os.system("rm -r ./cross-validation-data-1-0-3/")
     os.system("rm -r ./circor-heart-sound/")
+    os.system("rm -r ./physionet22/")
     os.system("rm ./murmur_final_result_current.csv")
     os.system("rm ./outcome_final_result_current.csv")
     os.system("rm -r ./circor-heart-sound/")
@@ -105,7 +106,7 @@ while True:
     with open("ohh.config", "w") as ohh_config_fpr:
         json.dump(parameter_run.to_dict(), ohh_config_fpr) 
 
-    assert os.system("python ./test_code_crossvalidation_splits.py") == 1
+    assert os.system("python ./test_code_crossvalidation_splits.py") == 0
 
     murmur_df = pd.read_csv("../murmur_final_result_current.csv")
     outcome_df = pd.read_csv("../outcome_final_result_current.csv")

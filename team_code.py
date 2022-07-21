@@ -49,6 +49,9 @@ from sklearn.utils import class_weight
 import autokeras as ak
 import random
 from tensorflow import feature_column
+import torch
+import torchvision
+from PIL import Image
 
 ORIGINAL_SEED = 42
 tf.keras.utils.set_random_seed(ORIGINAL_SEED)
@@ -1088,6 +1091,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
     
     # Create a folder for the model if it does not already exist.
     os.makedirs(model_folder, exist_ok=True)
+
+    # Download new outcome model
+    url = "http://algodev.matheusaraujo.com:8888/pretrained_models/dewen_outcome_model.pth"
+    download_model_from_url(url, os.path.join(model_folder, 'dewen_outcome_model.pth'))
     
     os.system("tar -xf noise_detection_sandbox.tar.gz -C {}".format(NOISE_DETECTION_WORKING_DIR))
 
@@ -1936,15 +1943,45 @@ def train_challenge_model(data_folder, model_folder, verbose):
     if verbose >= 1:
         print('Done.')
 
+class OutcomeModel(torch.nn.Module):
+    
+    def __init__(self, n_classes):
+        super(OutcomeModel, self).__init__()
+        # use pretrained resnet18
+        self.encoder = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1)
+        self.encoder.fc = torch.nn.Linear(512, 32)
+        self.classifier = torch.nn.Sequential(
+            torch.nn.Linear(256, 512),
+            torch.nn.BatchNorm1d(512),
+            torch.nn.ReLU(),
+            torch.nn.Linear(512, n_classes),
+        )
+        
+    def forward(self, x):
+        # x shape: [b, 8, 3, 128, 128]
+        # reshape x to [bx8, 3, 128, 128]
+        b, n, c, w, h = x.shape
+        x = x.reshape([b*n, c, w, h])
+        # apply encoder on all images
+        x = self.encoder(x)
+        # reshape back to [b, 8x32]
+        x = x.reshape([b, -1])
+        # apply classifier
+        x = self.classifier(x)
+        return x
+
 # Load your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def load_challenge_model(model_folder, verbose):
     noise_model = load_model(os.path.join(model_folder, 'noise_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_model = load_model(os.path.join(model_folder, 'murmur_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_decision_model = load_model(os.path.join(model_folder, 'murmur_decision_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-    outcome_model = load_model(os.path.join(model_folder, 'outcome_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy, "ohh_compute_cost_tf": ohh_compute_cost_tf })
+    # outcome_model = load_model(os.path.join(model_folder, 'outcome_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy, "ohh_compute_cost_tf": ohh_compute_cost_tf })
     # outcome_model = xgb.Booster()
     # outcome_model.load_model(os.path.join(model_folder, "outcome_model.json"))
+    outcome_model = OutcomeModel(2)
+    outcome_model.load_state_dict(torch.load(os.path.join(model_folder, 'dewen_outcome_model.pth'), map_location='cpu'))
+    outcome_model.eval()
     
     models_info = pd.read_pickle(os.path.join(model_folder,"models_info.pickle"))
     models_info = models_info.to_dict()
@@ -2098,13 +2135,38 @@ def run_challenge_model(model, data, recordings, verbose):
     # When used to use embs
     # patient_outcome_X = np.concatenate([embs_df.values.flatten(), patient_info ])
     patient_outcome_X = np.concatenate([patient_info, np.array([present_prob]) ])
-    outcome_proba = model['outcome_model'].predict(patient_outcome_X.reshape(1, -1).astype(float32))[0][0]
+    # outcome_proba = model['outcome_model'].predict(patient_outcome_X.reshape(1, -1).astype(float32))[0][0]
+    # outcome_probabilities = np.array([outcome_proba, 1 - outcome_proba])
     
-    outcome_probabilities = np.array([outcome_proba, 1 - outcome_proba])
+    # Dewen: new outcome inference code
+    # AUX_IMGS_FOLDER contains all clean images, we randomly sample 8 from them.
+    images = glob.glob(AUX_IMGS_FOLDER+'/*.png')
+    if len(images) < 8:
+        # padding to 8 images with the last image.
+        while (len(images) < 8):
+            images.append(images[-1])
+    # Inference 5 times and take the average results.
+    test_transform = torchvision.transforms.Compose([
+        torchvision.transforms.Resize(128),
+        torchvision.transforms.ToTensor(),
+    ])
+    outcome_probabilities = []
+    for _ in range(5):
+        images = random.choices(images, k=8)
+        data = []
+        for image in images:
+            current_image = Image.open(image)
+            current_image = test_transform(current_image)
+            data.append(current_image)
+        data = torch.stack(data).unsqueeze(dim=0)
+        out = model['outcome_model'](data)
+        outcome_probabilities.append(torch.nn.functional.softmax(out, dim=-1).detach().numpy())
+    outcome_probabilities = np.stack(outcome_probabilities).mean(axis=0)
+
     probabilities = np.concatenate([murmur_probabilities, outcome_probabilities])
-    
     murmur_labels = murmur_probabilities > model[FINAL_DECISION_THRESHOLD_lbl]
-    outcome_labels = outcome_probabilities > model[FINAL_OUTCOME_THRESHOLD_lbl]
+    # outcome_labels = outcome_probabilities > model[FINAL_OUTCOME_THRESHOLD_lbl]
+    outcome_labels = outcome_probabilities > 0.5
     labels = np.concatenate([murmur_labels, outcome_labels])
     classes = murmur_classes + outcome_classes
     # import ipdb;ipdb.set_trace()

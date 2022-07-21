@@ -2160,7 +2160,7 @@ def run_challenge_model(model, data, recordings, verbose):
             data.append(current_image)
         data = torch.stack(data).unsqueeze(dim=0)
         out = model['outcome_model'](data)
-        outcome_probabilities.append(torch.nn.functional.softmax(out, dim=-1).detach().numpy())
+        outcome_probabilities.append(torch.nn.functional.softmax(out, dim=-1).detach().numpy()[0])
     outcome_probabilities = np.stack(outcome_probabilities).mean(axis=0)
 
     probabilities = np.concatenate([murmur_probabilities, outcome_probabilities])

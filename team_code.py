@@ -105,6 +105,13 @@ import tensorflow_decision_forests as tfdf
 from tensorboard.plugins.hparams import api as hpar
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 
+gpus = tf.config.list_physical_devices('GPU')
+if len(gpus) > 0:
+    logger.info("Allocating 50\% of GPU for openl3")
+    for gpu in gpus:
+      tf.config.experimental.set_memory_growth(gpu, True)
+      tf.config.set_logical_device_configuration(gpu, [tf.config.LogicalDeviceConfiguration(memory_limit=5000)])
+
 demographics = ['pregnancy_status', 'weight', 'height', 'sex', 'bmi', 'Child', 'Adolescent', 'Infant']
 age_encoding = np.array(['Child', 'Adolescent', 'Infant'])
 

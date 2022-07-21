@@ -1683,7 +1683,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             all_negative = tn+fp
             if all_positive == 0 or all_negative == 0 or tn == 0:
                 continue
-            ohh_metric = (tp / all_positive) / (tn / all_negative)
+            ohh_metric = (tp / all_positive) +  5 * (tn / all_negative)
             if  (tp / (tp + fn)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl] or (tn / (tn + fp)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl]:
                 continue
             
@@ -1700,15 +1700,12 @@ def train_challenge_model(data_folder, model_folder, verbose):
             thresholds_df = thresholds_df.set_index("thresholds")
             thresholds_df.plot()
             plt.savefig("thresholds.png")
-            if thresholds_df.shape[0] > 5:
-                y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
-                x = thresholds_df.index.values
-                kn = KneeLocator(x, y, curve='convex', direction='decreasing')
-                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee if kn.knee else x[0]
-            else:
-                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
+            ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["ohh_metric"].idxmax()
             logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
             converged = True
+            uuid = get_unique_name()
+            thresholds_df.to_csv("../threshold_{}.csv".format(uuid))
+            pd.Series(ALGORITHM_HPS).to_csv("../hyperparameters{}.csv".format(uuid))
         else:
             logger.error("THRESHOLD NOT CHANGED!")
             if ALGORITHM_HPS[RUN_TEST_lbl]:
@@ -2045,8 +2042,9 @@ def run_challenge_model(model, data, recordings, verbose):
         classes = murmur_classes + outcome_classes
         return classes, labels, probabilities
     
-    # Delete noisy imgs    
-    # imgs_noisy["imgs_path"].apply(lambda x: os.remove(x))
+    # Delete noisy imgs 
+    if ALGORITHM_HPS[REMOVE_NOISE_lbl]:   
+        imgs_noisy["imgs_path"].apply(lambda x: os.remove(x))
     
     # Get murmur embeddings
     murmur_embeddings_model = tf.keras.models.Sequential(model["murmur_model"].layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])

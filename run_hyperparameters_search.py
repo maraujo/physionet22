@@ -101,6 +101,9 @@ while True:
 
     os.chdir('physionet22/')
     os.system("python generate_crossvalidation_splits.py")
+    os.system("rm ../the-circor-digiscope-phonocardiogram-dataset-1.0.3.zip")
+    os.system("rm -rf ../the-circor-digiscope-phonocardiogram-dataset-1.0.3")
+    os.system("rm -rf ../circor-heart-sound")
 
     logger.info("Saving ohh.config with the following parameters: \n{}".format(pprint.pformat(parameter_run.to_dict())))
     with open("ohh.config", "w") as ohh_config_fpr:

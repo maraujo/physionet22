@@ -1213,7 +1213,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             early_stopping_noise = tf.keras.callbacks.EarlyStopping(
                 monitor="val_loss",
                 min_delta=0.0001,
-                patience=50,
+                patience=30,
                 verbose=1,
                 mode="min",
                 baseline=None,
@@ -1503,7 +1503,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                                 epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_auc",
                 min_delta=0,
-                patience=50,
+                patience=40,
                 verbose=0,
                 mode="max",
                 baseline=None,
@@ -1663,7 +1663,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         murmur_decision_new.fit(train_decision_dataset, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_auc",
                 min_delta=0,
-                patience=50,
+                patience=20 * runs,
                 verbose=0,
                 mode="max",
                 baseline=None,
@@ -1710,12 +1710,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 "specificity" : tn / (tn + fp)
             })
         thresholds_df = pd.DataFrame(cwa_thresholds)
-        if thresholds_df.shape[0] > 0 or ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] != 0.5:
+        if thresholds_df.shape[0] > 0:
             thresholds_df = thresholds_df.set_index("thresholds")
             thresholds_df.plot()
             plt.savefig("thresholds.png")
-            if ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] == 0.5:
-                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["ohh_metric"].idxmax()
+            ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["ohh_metric"].idxmax()
             logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
             converged = True
             uuid = get_unique_name()

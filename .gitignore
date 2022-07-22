@@ -303,3 +303,7 @@ logs_hparams
 decision_evaluation.json
 thresholds.png
 thresholds_decision.png
+images_aux_outcome
+test_outcome_folder
+train_outcome_folder
+val_outcome_folder

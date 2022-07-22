@@ -49,6 +49,7 @@ from sklearn.utils import class_weight
 import autokeras as ak
 import random
 from tensorflow import feature_column
+from PIL import Image
 
 ORIGINAL_SEED = 42
 tf.keras.utils.set_random_seed(ORIGINAL_SEED)
@@ -104,6 +105,13 @@ from autokeras import keras_layers
 import tensorflow_decision_forests as tfdf
 from tensorboard.plugins.hparams import api as hpar
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
+
+gpus = tf.config.list_physical_devices('GPU')
+if len(gpus) > 0:
+    logger.info("Allocating 50\% of GPU for openl3")
+    for gpu in gpus:
+      tf.config.experimental.set_memory_growth(gpu, True)
+      tf.config.set_logical_device_configuration(gpu, [tf.config.LogicalDeviceConfiguration(memory_limit=5000)])
 
 demographics = ['pregnancy_status', 'weight', 'height', 'sex', 'bmi', 'Child', 'Adolescent', 'Infant']
 age_encoding = np.array(['Child', 'Adolescent', 'Infant'])
@@ -335,7 +343,7 @@ else:
     MURMUR_EPOCHS = 1000
     NOISE_EPOCHS = 1000
     MURMUR_DECISION_EPOCHS = 1000
-    OUTCOME_DECISION_EPOCHS = 1000
+    OUTCOME_DECISION_EPOCHS = 5
     MAX_TRIALS = 100
 
 #Download autoencoder
@@ -1081,6 +1089,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
     
     # Create a folder for the model if it does not already exist.
     os.makedirs(model_folder, exist_ok=True)
+
+    # Download new outcome model
+    url = "http://algodev.matheusaraujo.com:8888/pretrained_models/dewen_outcome_model.pth"
+    download_model_from_url(url, os.path.join(model_folder, 'dewen_outcome_model.pth'))
     
     os.system("tar -xf noise_detection_sandbox.tar.gz -C {}".format(NOISE_DETECTION_WORKING_DIR))
 
@@ -1199,7 +1211,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             early_stopping_noise = tf.keras.callbacks.EarlyStopping(
                 monitor="val_loss",
                 min_delta=0.0001,
-                patience=30,
+                patience=50,
                 verbose=1,
                 mode="min",
                 baseline=None,
@@ -1489,7 +1501,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
                                 epochs = MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight=sklearn_weights_murmur, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_auc",
                 min_delta=0,
-                patience=40,
+                patience=50,
                 verbose=0,
                 mode="max",
                 baseline=None,
@@ -1649,7 +1661,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
         murmur_decision_new.fit(train_decision_dataset, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl],  validation_freq=1,  validation_data = val_decision_dataset, epochs = MURMUR_DECISION_EPOCHS, class_weight=sklearn_weights_decision, callbacks=[tf.keras.callbacks.EarlyStopping(
                 monitor="val_auc",
                 min_delta=0,
-                patience=20 * runs,
+                patience=50,
                 verbose=0,
                 mode="max",
                 baseline=None,
@@ -1683,7 +1695,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             all_negative = tn+fp
             if all_positive == 0 or all_negative == 0 or tn == 0:
                 continue
-            ohh_metric = (tp / all_positive) / (tn / all_negative)
+            ohh_metric = (tp / all_positive) +  5 * (tn / all_negative)
             if  (tp / (tp + fn)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl] or (tn / (tn + fp)) < ALGORITHM_HPS[MIN_SENS_AND_SPEC_lbl]:
                 continue
             
@@ -1696,19 +1708,17 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 "specificity" : tn / (tn + fp)
             })
         thresholds_df = pd.DataFrame(cwa_thresholds)
-        if thresholds_df.shape[0] > 0:
+        if thresholds_df.shape[0] > 0 or ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] != 0.5:
             thresholds_df = thresholds_df.set_index("thresholds")
             thresholds_df.plot()
             plt.savefig("thresholds.png")
-            if thresholds_df.shape[0] > 5:
-                y = thresholds_df["sensitivity"] / thresholds_df["specificity"]
-                x = thresholds_df.index.values
-                kn = KneeLocator(x, y, curve='convex', direction='decreasing')
-                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = kn.knee if kn.knee else x[0]
-            else:
-                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["sensitivity"].idxmax()
+            if ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] == 0.5:
+                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["ohh_metric"].idxmax()
             logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
             converged = True
+            uuid = get_unique_name()
+            thresholds_df.to_csv("../threshold_{}.csv".format(uuid))
+            pd.Series(ALGORITHM_HPS).to_csv("../hyperparameters{}.csv".format(uuid))
         else:
             logger.error("THRESHOLD NOT CHANGED!")
             if ALGORITHM_HPS[RUN_TEST_lbl]:
@@ -1931,15 +1941,45 @@ def train_challenge_model(data_folder, model_folder, verbose):
     if verbose >= 1:
         print('Done.')
 
+class OutcomeModel(torch.nn.Module):
+    
+    def __init__(self, n_classes):
+        super(OutcomeModel, self).__init__()
+        # use pretrained resnet18
+        self.encoder = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1)
+        self.encoder.fc = torch.nn.Linear(512, 32)
+        self.classifier = torch.nn.Sequential(
+            torch.nn.Linear(256, 512),
+            torch.nn.BatchNorm1d(512),
+            torch.nn.ReLU(),
+            torch.nn.Linear(512, n_classes),
+        )
+        
+    def forward(self, x):
+        # x shape: [b, 8, 3, 128, 128]
+        # reshape x to [bx8, 3, 128, 128]
+        b, n, c, w, h = x.shape
+        x = x.reshape([b*n, c, w, h])
+        # apply encoder on all images
+        x = self.encoder(x)
+        # reshape back to [b, 8x32]
+        x = x.reshape([b, -1])
+        # apply classifier
+        x = self.classifier(x)
+        return x
+
 # Load your trained model. This function is *required*. You should edit this function to add your code, but do *not* change the
 # arguments of this function.
 def load_challenge_model(model_folder, verbose):
     noise_model = load_model(os.path.join(model_folder, 'noise_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_model = load_model(os.path.join(model_folder, 'murmur_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_decision_model = load_model(os.path.join(model_folder, 'murmur_decision_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-    outcome_model = load_model(os.path.join(model_folder, 'outcome_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy, "ohh_compute_cost_tf": ohh_compute_cost_tf })
+    # outcome_model = load_model(os.path.join(model_folder, 'outcome_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy, "ohh_compute_cost_tf": ohh_compute_cost_tf })
     # outcome_model = xgb.Booster()
     # outcome_model.load_model(os.path.join(model_folder, "outcome_model.json"))
+    outcome_model = OutcomeModel(2)
+    outcome_model.load_state_dict(torch.load(os.path.join(model_folder, 'dewen_outcome_model.pth'), map_location='cpu'))
+    outcome_model.eval()
     
     models_info = pd.read_pickle(os.path.join(model_folder,"models_info.pickle"))
     models_info = models_info.to_dict()
@@ -2045,8 +2085,9 @@ def run_challenge_model(model, data, recordings, verbose):
         classes = murmur_classes + outcome_classes
         return classes, labels, probabilities
     
-    # Delete noisy imgs    
-    # imgs_noisy["imgs_path"].apply(lambda x: os.remove(x))
+    # Delete noisy imgs 
+    if ALGORITHM_HPS[REMOVE_NOISE_lbl]:   
+        imgs_noisy["imgs_path"].apply(lambda x: os.remove(x))
     
     # Get murmur embeddings
     murmur_embeddings_model = tf.keras.models.Sequential(model["murmur_model"].layers[:EMBEDDING_LAYER_REFERENCE_MURMUR_MODEL])
@@ -2092,13 +2133,38 @@ def run_challenge_model(model, data, recordings, verbose):
     # When used to use embs
     # patient_outcome_X = np.concatenate([embs_df.values.flatten(), patient_info ])
     patient_outcome_X = np.concatenate([patient_info, np.array([present_prob]) ])
-    outcome_proba = model['outcome_model'].predict(patient_outcome_X.reshape(1, -1).astype(float32))[0][0]
+    # outcome_proba = model['outcome_model'].predict(patient_outcome_X.reshape(1, -1).astype(float32))[0][0]
+    # outcome_probabilities = np.array([outcome_proba, 1 - outcome_proba])
     
-    outcome_probabilities = np.array([outcome_proba, 1 - outcome_proba])
+    # Dewen: new outcome inference code
+    # AUX_IMGS_FOLDER contains all clean images, we randomly sample 8 from them.
+    images = glob.glob(AUX_IMGS_FOLDER+'/*.png')
+    if len(images) < 8:
+        # padding to 8 images with the last image.
+        while (len(images) < 8):
+            images.append(images[-1])
+    # Inference 5 times and take the average results.
+    test_transform = torchvision.transforms.Compose([
+        torchvision.transforms.Resize(128),
+        torchvision.transforms.ToTensor(),
+    ])
+    outcome_probabilities = []
+    for _ in range(5):
+        images = random.choices(images, k=8)
+        data = []
+        for image in images:
+            current_image = Image.open(image)
+            current_image = test_transform(current_image)
+            data.append(current_image)
+        data = torch.stack(data).unsqueeze(dim=0)
+        out = model['outcome_model'](data)
+        outcome_probabilities.append(torch.nn.functional.softmax(out, dim=-1).detach().numpy()[0])
+    outcome_probabilities = np.stack(outcome_probabilities).mean(axis=0)
+
     probabilities = np.concatenate([murmur_probabilities, outcome_probabilities])
-    
     murmur_labels = murmur_probabilities > model[FINAL_DECISION_THRESHOLD_lbl]
-    outcome_labels = outcome_probabilities > model[FINAL_OUTCOME_THRESHOLD_lbl]
+    # outcome_labels = outcome_probabilities > model[FINAL_OUTCOME_THRESHOLD_lbl]
+    outcome_labels = outcome_probabilities > 0.5
     labels = np.concatenate([murmur_labels, outcome_labels])
     classes = murmur_classes + outcome_classes
     # import ipdb;ipdb.set_trace()

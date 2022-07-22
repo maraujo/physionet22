@@ -83,9 +83,10 @@ while True:
     #Cleaning from previous run    
     os.system("rm -r ./cross-validation-data-1-0-3/")
     os.system("rm -r ./circor-heart-sound/")
+    os.system("rm -r ./physionet22/")
     os.system("rm ./murmur_final_result_current.csv")
     os.system("rm ./outcome_final_result_current.csv")
-    os.system("rm -r ./circor-heart-sound/")
+    
 
     os.system("mkdir -p ./cross-validation-data-1-0-3/")
     os.system("mkdir -p ./circor-heart-sound/1.0.3/")
@@ -100,12 +101,17 @@ while True:
 
     os.chdir('physionet22/')
     os.system("python generate_crossvalidation_splits.py")
+    os.system("rm ../the-circor-digiscope-phonocardiogram-dataset-1.0.3.zip")
+    os.system("rm -rf ../the-circor-digiscope-phonocardiogram-dataset-1.0.3")
+    os.system("rm -rf ../circor-heart-sound")
+    os.system("rm -rf ../hyperparameters*")
+    os.system("rm -rf ../threshold_*")
 
     logger.info("Saving ohh.config with the following parameters: \n{}".format(pprint.pformat(parameter_run.to_dict())))
     with open("ohh.config", "w") as ohh_config_fpr:
         json.dump(parameter_run.to_dict(), ohh_config_fpr) 
 
-    assert os.system("python ./test_code_crossvalidation_splits.py") == 1
+    assert os.system("python ./test_code_crossvalidation_splits.py") == 0
 
     murmur_df = pd.read_csv("../murmur_final_result_current.csv")
     outcome_df = pd.read_csv("../outcome_final_result_current.csv")

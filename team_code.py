@@ -105,6 +105,9 @@ from autokeras import keras_layers
 import tensorflow_decision_forests as tfdf
 from tensorboard.plugins.hparams import api as hpar
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
+import torch
+import torchvision
+from PIL import Image
 
 gpus = tf.config.list_physical_devices('GPU')
 if len(gpus) > 0:
@@ -1709,9 +1712,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
             })
         thresholds_df = pd.DataFrame(cwa_thresholds)
         if thresholds_df.shape[0] > 0 or ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] != 0.5:
-            thresholds_df = thresholds_df.set_index("thresholds")
-            thresholds_df.plot()
-            plt.savefig("thresholds.png")
+            if thresholds_df.shape[0] > 0:
+                thresholds_df = thresholds_df.set_index("thresholds")
+                thresholds_df.plot()
+                plt.savefig("thresholds.png")
             if ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] == 0.5:
                 ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["ohh_metric"].idxmax()
             logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))

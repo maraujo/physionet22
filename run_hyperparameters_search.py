@@ -86,7 +86,7 @@ while True:
     os.system("rm -r ./physionet22/")
     os.system("rm ./murmur_final_result_current.csv")
     os.system("rm ./outcome_final_result_current.csv")
-    os.system("rm -r ./circor-heart-sound/")
+    
 
     os.system("mkdir -p ./cross-validation-data-1-0-3/")
     os.system("mkdir -p ./circor-heart-sound/1.0.3/")
@@ -104,6 +104,8 @@ while True:
     os.system("rm ../the-circor-digiscope-phonocardiogram-dataset-1.0.3.zip")
     os.system("rm -rf ../the-circor-digiscope-phonocardiogram-dataset-1.0.3")
     os.system("rm -rf ../circor-heart-sound")
+    os.system("rm -rf ../hyperparameters*")
+    os.system("rm -rf ../threshold_*")
 
     logger.info("Saving ohh.config with the following parameters: \n{}".format(pprint.pformat(parameter_run.to_dict())))
     with open("ohh.config", "w") as ohh_config_fpr:

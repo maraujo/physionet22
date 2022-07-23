@@ -2149,7 +2149,7 @@ def run_challenge_model(model, data, recordings, verbose):
             images.append(images[-1])
     # Inference 5 times and take the average results.
     test_transform = torchvision.transforms.Compose([
-        torchvision.transforms.Resize(128),
+        torchvision.transforms.Resize((128, 128)),
         torchvision.transforms.ToTensor(),
     ])
     outcome_probabilities = []

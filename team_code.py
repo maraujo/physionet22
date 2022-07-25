@@ -1071,6 +1071,55 @@ def load_embs_labels(folder, problem, patient_murmur_outcome_df):
     labels.append(label)
   return embs, labels
 
+def get_post(x_in):
+    x = tf.keras.layers.LeakyReLU()(x_in)
+    x = tf.keras.layers.BatchNormalization()(x)
+    return x
+
+def get_block(x_in, ch_in, ch_out):
+    x = tf.keras.layers.Conv2D(ch_in,
+               kernel_size=(1, 1),
+               padding='same',
+               use_bias=False)(x_in)
+    x = get_post(x)
+
+    x = tf.keras.layers.DepthwiseConv2D(kernel_size=(1, 3), padding='same', use_bias=False)(x)
+    x = get_post(x)
+    x = tf.keras.layers.MaxPool2D(pool_size=(2, 1),
+                  strides=(2, 1))(x) # Separable pooling
+
+    x = tf.keras.layers.DepthwiseConv2D(kernel_size=(3, 1),
+                        padding='same',
+                        use_bias=False)(x)
+    x = get_post(x)
+
+    x = tf.keras.layers.Conv2D(ch_out,
+               kernel_size=(2, 1),
+               strides=(1, 2),
+               padding='same',
+               use_bias=False)(x)
+    x = get_post(x)
+
+    return x
+
+
+def Effnet(input_shape, nb_classes, include_top=True, weights=None):
+    x_in = tf.keras.Input(shape=input_shape)
+
+    x = get_block(x_in, 32, 64)
+    x = get_block(x, 64, 128)
+    x = get_block(x, 128, 256)
+
+    if include_top:
+        x = tf.keras.layers.Flatten()(x)
+        x = tf.keras.layers.Dense(nb_classes, activation='softmax')(x)
+
+    model =tf.keras.Model(inputs=x_in, outputs=x)
+
+    if weights is not None:
+        model.load_weights(weights, by_name=True)
+
+    return model
 
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
@@ -2298,6 +2347,12 @@ def get_murmur_decision_model_configs():
     return murmur_decision_config
 
 def get_murmur_model():
+    model = Effnet(input_shape=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], 3), nb_classes=1)
+    optimizer = tf.keras.optimizers.Adam(
+                       learning_rate=ALGORITHM_HPS[LEARNING_RATE_NOISE_lbl]
+                    )  
+    model.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
+    return model
     # return ak.ImageClassifier()
     if ALGORITHM_HPS[IS_MURMUR_MODEL_XCEPTION_lbl]:
         noise_input_config = {'batch_input_shape': (None, ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], 3),  'dtype': 'float32',  'name': 'input_1', 'ragged': False, 'sparse': False }
@@ -2356,6 +2411,13 @@ def get_murmur_model_configs():
 
 
 def get_noise_model_v2(): 
+    model = Effnet(input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3), nb_classes=1)
+    optimizer = tf.keras.optimizers.Adam(
+                       learning_rate=ALGORITHM_HPS[LEARNING_RATE_NOISE_lbl]
+                    )  
+    model.compile(optimizer=optimizer, metrics=get_all_metrics(), loss="binary_crossentropy",)
+    return model
+
     noise_model = tf.keras.models.Sequential()
     noise_model.add(CastToFloat32.from_config({'dtype': 'float32', 'name': 'cast_to_float32', 'trainable': True}))
     noise_model.add(tf.keras.layers.Rescaling(1./127.5, offset=-1))

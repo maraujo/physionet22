@@ -49,8 +49,6 @@ from sklearn.utils import class_weight
 import autokeras as ak
 import random
 from tensorflow import feature_column
-import torch
-import torchvision
 from PIL import Image
 
 ORIGINAL_SEED = 42
@@ -107,6 +105,9 @@ from autokeras import keras_layers
 import tensorflow_decision_forests as tfdf
 from tensorboard.plugins.hparams import api as hpar
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
+import torch
+import torchvision
+from PIL import Image
 
 gpus = tf.config.list_physical_devices('GPU')
 if len(gpus) > 0:
@@ -1710,11 +1711,13 @@ def train_challenge_model(data_folder, model_folder, verbose):
                 "specificity" : tn / (tn + fp)
             })
         thresholds_df = pd.DataFrame(cwa_thresholds)
-        if thresholds_df.shape[0] > 0:
-            thresholds_df = thresholds_df.set_index("thresholds")
-            thresholds_df.plot()
-            plt.savefig("thresholds.png")
-            ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["ohh_metric"].idxmax()
+        if thresholds_df.shape[0] > 0 or ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] != 0.5:
+            if thresholds_df.shape[0] > 0:
+                thresholds_df = thresholds_df.set_index("thresholds")
+                thresholds_df.plot()
+                plt.savefig("thresholds.png")
+            if ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] == 0.5:
+                ALGORITHM_HPS[FINAL_DECISION_THRESHOLD_lbl] = thresholds_df["ohh_metric"].idxmax()
             logger.info(tabulate(thresholds_df, headers='keys', tablefmt='psql'))
             converged = True
             uuid = get_unique_name()
@@ -2146,7 +2149,7 @@ def run_challenge_model(model, data, recordings, verbose):
             images.append(images[-1])
     # Inference 5 times and take the average results.
     test_transform = torchvision.transforms.Compose([
-        torchvision.transforms.Resize(128),
+        torchvision.transforms.Resize((128, 128)),
         torchvision.transforms.ToTensor(),
     ])
     outcome_probabilities = []

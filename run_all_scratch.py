@@ -21,9 +21,6 @@ logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 PATIENCE_DAYS = 2
 github_token = "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"
 
-
-
-
 os.system("curl --create-dirs -o $HOME/.postgresql/root.crt -O https://cockroachlabs.cloud/clusters/6cadd36b-9892-418c-88c7-64a5781755ec/cert")
 
 dir_path = os.getcwd()
@@ -51,7 +48,7 @@ os.system("rm -r ./circor-heart-sound/")
 
 os.system("mkdir -p ./cross-validation-data-1-0-3/")
 os.system("mkdir -p ./circor-heart-sound/1.0.3/")
-os.system("git clone --branch matheus https://matheus:{}@github.com/maraujo/physionet22.git".format(github_token))
+os.system("git clone --branch augmentation_test https://matheus:{}@github.com/maraujo/physionet22.git".format(github_token))
 assert os.system("pip install -r ./physionet22/requirements.txt") == 0
 assert os.system("pip install tensorflow==2.8.2") == 0
 

@@ -50,6 +50,10 @@ import autokeras as ak
 import random
 from tensorflow import feature_column
 from PIL import Image
+import warnings
+warnings.filterwarnings('ignore', '.*Possible clipped samples in output.*', )
+warnings.warn('DelftStack')
+warnings.warn('Do not show this message')
 
 ORIGINAL_SEED = 42
 tf.keras.utils.set_random_seed(ORIGINAL_SEED)
@@ -220,6 +224,7 @@ LEARNING_RATE_OUTCOME_lbl = "LEARNING_RATE_OUTCOME"
 ACTIVATION_FUNCTION_lbl = "ACTIVATION_FUNCTION"
 NORMALIZE_OUTCOMES_lbl = "NORMALIZE_OUTCOMES" 
 FILTER_SIZE_CNN_lbl = "FILTER_SIZE_CNN"
+AUGMENT_RATE_lbl = "AUGMENT_RATE"
 
 ALGORITHM_HPS = {
     EMBS_SIZE_lbl : 2,
@@ -272,7 +277,8 @@ ALGORITHM_HPS = {
     LEARNING_RATE_NOISE_lbl : 0.0001,
     LEARNING_RATE_MURMUR_lbl : 0.001,
     LEARNING_RATE_DECISION_lbl : 0.0001,
-    LEARNING_RATE_OUTCOME_lbl : 0.001
+    LEARNING_RATE_OUTCOME_lbl : 0.001,
+    AUGMENT_RATE_lbl : 5
 }
 
 if os.path.exists("ohh.config"):
@@ -463,6 +469,78 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
     b, a = butter_bandpass(lowcut, highcut, fs, order=order)
     y = lfilter(b, a, data)
     return y
+
+from audiomentations import AddGaussianSNR, FrequencyMask, Compose,AddBackgroundNoise, RoomSimulator, AddGaussianNoise, TimeStretch, PitchShift, Shift, LoudnessNormalization,  AirAbsorption, Gain
+import numpy as np
+import os, numpy as np, scipy as sp, scipy.io, scipy.io.wavfile
+import soundfile as sf
+
+from audiomentations.augmentations.seven_band_parametric_eq import SevenBandParametricEQ
+
+augment = Compose([
+    AddGaussianSNR(min_snr_in_db=15, max_snr_in_db=45, p=0.5),
+    Gain(min_gain_in_db=-12, max_gain_in_db=-6, p=0.5),
+    # PitchShift(min_semitones=-2, max_semitones=2, p=1),
+    # Shift(min_fraction=-0.1, max_fraction=0.1, p=0.5),
+    # SevenBandParametricEQ(p=1),
+    # RoomSimulator(),
+    FrequencyMask(min_frequency_band=0.1, max_frequency_band=0.5, p=0.5),
+    LoudnessNormalization(min_lufs_in_db=-16, max_lufs_in_db=-6, p=1.0),
+    AddBackgroundNoise(
+            sounds_path="normal_breathing_noise",
+            min_snr_in_db=30,
+            max_snr_in_db=70,
+            noise_rms="absolute",
+            p=0.8,),
+
+])
+
+def augment_patient(args):
+    patient_txt = args[0]
+    folder_path = args[1]
+    augmenter_rate = args[2]
+    folder_path = os.path.split(patient_txt)[0]
+    current_patient_data = load_patient_data(patient_txt)
+    patient_id = get_patient_id(current_patient_data)
+    all_patient_files = glob.glob(folder_path.rstrip(os.path.sep) + os.path.sep + "{}*".format(patient_id))
+    files_to_copy = [*filter(lambda x: x.endswith("hea"), all_patient_files)] + [*filter(lambda x: x.endswith("tsv"), all_patient_files)]
+    for augment_index in range(augmenter_rate):
+        wav_files = glob.glob(folder_path.rstrip(os.path.sep) + os.path.sep + "{}*.wav".format(patient_id))
+        new_patient_id = "aug" + patient_id + "at" + get_unique_name().split("-")[0]
+        # Copy older files
+        new_patient_data = current_patient_data.replace(patient_id, new_patient_id)
+        new_patient_txt = patient_txt.replace(patient_id, new_patient_id)
+        for file_to_copy in files_to_copy:
+            shutil.copy2(file_to_copy, files_to_copy[0].replace(patient_id, new_patient_id))
+        with open(new_patient_txt, "w") as ptr:
+            ptr.write(new_patient_data)
+        # Generate new wav files
+        for wav_file in wav_files:
+            frequency, recording = sp.io.wavfile.read(wav_file)
+            augmented_samples = augment(samples=recording.astype(np.float32), sample_rate=REAL_SR)
+            pos = os.path.splitext(os.path.basename(wav_file))[0].split("_")[1]
+            new_path = os.path.split(wav_files[0])[0] + os.path.sep + new_patient_id + "_" + pos + ".wav"
+            sf.write(new_path, augmented_samples, REAL_SR, 'PCM_16')
+
+def augment_training_folder(folder_path, augmenter_rate=5):
+    patient_text_files = glob.glob(folder_path.rstrip(os.path.sep) + os.path.sep + "*.txt")
+    folder_paths = [folder_path] * len(patient_text_files)
+    augmenter_rates = [5] * len(patient_text_files)
+    pool = Pool(processes=(min(WORKERS, 8)))
+    for _ in tqdm(pool.imap(augment_patient, zip(patient_text_files, folder_paths, augmenter_rates )), total=len(patient_text_files)):
+        pass
+    pool.close()
+
+def augmenter(filepath, destinypath, augmentation_rate=5):
+    frequency, recording = sp.io.wavfile.read(filepath)
+    for augmentation in range(augmentation_rate):
+        print("Doing augmentation: {}".format(augmentation))
+        basename = os.path.basename(destinypath)
+        import ipdb;ipdb.set_trace()
+        pass
+        augmented_samples = augment(samples=recording.astype(np.float32), sample_rate=REAL_SR)
+        sf.write(basename + "_{}.wav".format(augmentation), augmented_samples, REAL_SR, 'PCM_16')
+
 
 def clean_frequency_heartbeat(wavfile_path):
   x, sr_fake = load_wav_file_ohh(wavfile_path)
@@ -1088,7 +1166,9 @@ def train_challenge_model(data_folder, model_folder, verbose):
     os.makedirs(AUX_IMGS_POSITIVE_FOLDER, exist_ok=True)
     os.makedirs(AUX_IMGS_NEGATIVE_FOLDER, exist_ok=True)
     
-    
+    if ALGORITHM_HPS[AUGMENT_RATE_lbl] != 0:
+        # Perform data augmentation
+        augment_training_folder(data_folder, ALGORITHM_HPS[AUGMENT_RATE_lbl])
     
     # Create a folder for the model if it does not already exist.
     os.makedirs(model_folder, exist_ok=True)
@@ -1237,6 +1317,7 @@ def train_challenge_model(data_folder, model_folder, verbose):
             options=None,
             save_traces=True
         )
+
     
     
     # ROOT_FOLDER = "/dev/shm/noise_imgs"

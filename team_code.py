@@ -1164,6 +1164,7 @@ def load_embs_labels(folder, problem, patient_murmur_outcome_df):
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
     AUX_FOLDER = "recordings_aux"
+    NEW_DATA_FOLDER = "new_data_folder"
     AUX_IMGS_FOLDER = "images_aux"
     AUX_IMGS_POSITIVE_FOLDER = os.path.join(AUX_IMGS_FOLDER, "positive")
     AUX_IMGS_NEGATIVE_FOLDER = os.path.join(AUX_IMGS_FOLDER, "negative")
@@ -1172,6 +1173,11 @@ def train_challenge_model(data_folder, model_folder, verbose):
     if ALGORITHM_HPS[GENERATE_MEL_SPECTOGRAMS_TRAIN_lbl]:
         clean_current_path()
     
+    logger.info("Copying to new Data Folder")
+    shutil.rmtree(NEW_DATA_FOLDER, ignore_errors=True)
+    shutil.copytree(data_folder, NEW_DATA_FOLDER)
+    data_folder = NEW_DATA_FOLDER
+    
     os.makedirs(AUX_FOLDER, exist_ok=True)
     os.makedirs(AUX_IMGS_FOLDER, exist_ok=True)
     os.makedirs(AUX_IMGS_POSITIVE_FOLDER, exist_ok=True)
@@ -1179,15 +1185,20 @@ def train_challenge_model(data_folder, model_folder, verbose):
     
     if ALGORITHM_HPS[AUGMENT_RATE_lbl] != 0:
         # Perform data augmentation
+        logger.info("Augmenting data")
         augment_training_folder(data_folder, ALGORITHM_HPS[AUGMENT_RATE_lbl])
     
     # Create a folder for the model if it does not already exist.
     os.makedirs(model_folder, exist_ok=True)
 
     # Download new outcome model
-    url = "http://algodev.matheusaraujo.com:8888/pretrained_models/dewen_outcome_model.pth"
-    download_model_from_url(url, os.path.join(model_folder, 'dewen_outcome_model.pth'))
-    
+    if not os.path.exists("dewen_outcome_model.pth"):
+        url = "http://algodev.matheusaraujo.com:8888/pretrained_models/dewen_outcome_model.pth"
+        download_model_from_url(url, os.path.join(model_folder, 'dewen_outcome_model.pth'))
+    else:
+        shutil.copy2('dewen_outcome_model.pth', os.path.join(model_folder, 'dewen_outcome_model.pth'))
+
+
     os.system("tar -xf noise_detection_sandbox.tar.gz -C {}".format(NOISE_DETECTION_WORKING_DIR))
 
     if ALGORITHM_HPS[LOAD_TRAINED_MODELS_lbl]:

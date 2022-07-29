@@ -278,7 +278,7 @@ ALGORITHM_HPS = {
     LEARNING_RATE_MURMUR_lbl : 0.001,
     LEARNING_RATE_DECISION_lbl : 0.0001,
     LEARNING_RATE_OUTCOME_lbl : 0.001,
-    AUGMENT_RATE_lbl : 5
+    AUGMENT_RATE_lbl : 7
 }
 
 if os.path.exists("ohh.config"):
@@ -470,7 +470,7 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
     y = lfilter(b, a, data)
     return y
 
-from audiomentations import AddGaussianSNR, FrequencyMask, Compose,AddBackgroundNoise, RoomSimulator, AddGaussianNoise, TimeStretch, PitchShift, Shift, LoudnessNormalization,  AirAbsorption, Gain
+from audiomentations import AddGaussianSNR, BandStopFilter, FrequencyMask, Compose,AddBackgroundNoise, RoomSimulator, AddGaussianNoise, TimeStretch, PitchShift, Shift, LoudnessNormalization,  AirAbsorption, Gain
 import numpy as np
 import os, numpy as np, scipy as sp, scipy.io, scipy.io.wavfile
 import soundfile as sf
@@ -484,6 +484,17 @@ augment = Compose([
     # Shift(min_fraction=-0.1, max_fraction=0.1, p=0.5),
     # SevenBandParametricEQ(p=1),
     # RoomSimulator(),
+    Shift(min_fraction=0.2, max_fraction=0.5, rollover=True, p=0.75),
+    BandStopFilter(
+                min_center_freq=50,
+                max_center_freq=750,
+                min_bandwidth_fraction=0.1,
+                max_bandwidth_fraction=0.5,
+                min_rolloff=6,
+                max_rolloff=24,
+                zero_phase=False,
+                p=0.5,
+            ),
     FrequencyMask(min_frequency_band=0.1, max_frequency_band=0.5, p=0.5),
     LoudnessNormalization(min_lufs_in_db=-16, max_lufs_in_db=-6, p=1.0),
     AddBackgroundNoise(
@@ -1407,7 +1418,10 @@ def train_challenge_model(data_folder, model_folder, verbose):
         for i in tqdm(range(num_patient_files)):
         #     # Load the current patient data and recordings.
             current_patient_data = load_patient_data(patient_files[i])
-            current_recordings, locations = load_recordings_custom(data_folder, current_patient_data)
+            try:
+                current_recordings, locations = load_recordings_custom(data_folder, current_patient_data)
+            except:
+                continue
             murmur_locations = get_murmur_locations(current_patient_data)
             patient_id = get_patient_id(current_patient_data)
             split = ""

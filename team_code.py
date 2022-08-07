@@ -1161,225 +1161,123 @@ def load_embs_labels(folder, problem, patient_murmur_outcome_df):
   return embs, labels
 
 
+def get_mel_files_physionet16(path, output_folder):
+
+    files = glob.glob(os.path.join(path, "training-*/*.wav"))
+    print("Found %d files." % len(files))
+    seconds_window = 2
+
+    for f in tqdm(files):
+        sr = 4000
+        x, orig_sr = librosa.load(f, sr=2000)
+        x = librosa.resample(x, orig_sr=orig_sr, target_sr=sr)
+
+        duration_seconds = len(x) / sr
+
+        fig_image, ax_image = generate_mel_image_v2(x, sr, seconds_window, hop_length=ALGORITHM_HPS[HOP_LENGTH_lbl])
+        fig_image.canvas.draw()
+        temp_canvas = fig_image.canvas
+        pil_image_full = PIL.Image.frombytes('RGB', temp_canvas.get_width_height(), temp_canvas.tostring_rgb())
+        pil_image_width, pil_image_height = pil_image_full.size
+        for end_time in range(seconds_window, math.floor(duration_seconds), seconds_window):
+            # Crop sound
+            start_time = end_time - seconds_window
+            image_begin = (pil_image_width / duration_seconds) * start_time
+            image_end = image_begin + (pil_image_width / duration_seconds) * (seconds_window)
+            pil_image = pil_image_full.crop((image_begin, pil_image_height * (1 - ALGORITHM_HPS[IMG_HEIGHT_RATIO_lbl]), image_end, pil_image_height))
+            output_filepath_prefix = output_folder.rstrip("/") + os.path.sep + os.path.splitext(os.path.basename(f))[0] + "_{}_to_{}".format(int(start_time), int(end_time))
+            output_filepath_image = output_filepath_prefix + ".png"
+            pil_image.save(output_filepath_image)
+            pil_image.close()
+            del pil_image
+        fig_image.clf()
+        plt.close()
+        del x
+        del sr
+
+    print("Done!")
+
+
+def split_mel_files_physionet16(path, mel_folder, output_folder):
+    files = glob.glob(os.path.join(path, "training-*/*.hea"))
+    print("Found %d files." % len(files))
+
+    for fname in tqdm(files):
+
+        with open(fname, "r") as f:
+            lastine = f.readlines()[-1].strip()
+
+        basename = os.path.basename(fname).split(".")[0]
+        basename = os.path.join(mel_folder, basename)
+        input_files = glob.glob(basename + "*")
+
+        for input_file in input_files:
+
+            if lastine == "# Abnormal":
+                output_file = os.path.join(output_folder, "positive", os.path.basename(input_file))
+                shutil.copy(input_file, output_file)
+
+            elif lastine == "# Normal":
+                output_file = os.path.join(output_folder, "negative", os.path.basename(input_file))
+                shutil.copy(input_file, output_file)
+
+            else:
+                aivocemecomplica
+
+
 # Train your model.
 def train_challenge_model(data_folder, model_folder, verbose):
-    AUX_FOLDER = "recordings_aux"
-    NEW_DATA_FOLDER = "new_data_folder"
-    AUX_IMGS_FOLDER = "images_aux"
-    AUX_IMGS_POSITIVE_FOLDER = os.path.join(AUX_IMGS_FOLDER, "positive")
-    AUX_IMGS_NEGATIVE_FOLDER = os.path.join(AUX_IMGS_FOLDER, "negative")
-    murmur_image_folders = [train_positive_folder, train_negative_folder, val_positive_folder, val_negative_folder, test_positive_folder, test_negative_folder]
-    global ALGORITHM_HPS 
-    if ALGORITHM_HPS[GENERATE_MEL_SPECTOGRAMS_TRAIN_lbl]:
-        clean_current_path()
-    
-    logger.info("Copying to new Data Folder")
-    shutil.rmtree(NEW_DATA_FOLDER, ignore_errors=True)
-    shutil.copytree(data_folder, NEW_DATA_FOLDER)
-    data_folder = NEW_DATA_FOLDER
-    
-    os.makedirs(AUX_FOLDER, exist_ok=True)
-    os.makedirs(AUX_IMGS_FOLDER, exist_ok=True)
-    os.makedirs(AUX_IMGS_POSITIVE_FOLDER, exist_ok=True)
-    os.makedirs(AUX_IMGS_NEGATIVE_FOLDER, exist_ok=True)
-    
-    if ALGORITHM_HPS[AUGMENT_RATE_lbl] != 0:
-        # Perform data augmentation
-        logger.info("Augmenting data")
-        augment_training_folder(data_folder, ALGORITHM_HPS[AUGMENT_RATE_lbl])
-    
-    # Create a folder for the model if it does not already exist.
-    os.makedirs(model_folder, exist_ok=True)
 
-    # Download new outcome model
-    if not os.path.exists("dewen_outcome_model.pth"):
-        url = "http://algodev.matheusaraujo.com:8888/pretrained_models/dewen_outcome_model.pth"
-        download_model_from_url(url, os.path.join(model_folder, 'dewen_outcome_model.pth'))
-    else:
-        shutil.copy2('dewen_outcome_model.pth', os.path.join(model_folder, 'dewen_outcome_model.pth'))
+    # get_mel_files_physionet16("/home/palotti/github/physionet22/physionet16/training/", "physionet16_allprocessed")
+    #   split_mel_files_physionet16("/home/palotti/github/physionet22/physionet16/training/", "physionet16_allprocessed", "physionet16_train")
 
+    murmur16_path = "/home/palotti/github/physionet22/physionet16_train/"
 
-    os.system("tar -xf noise_detection_sandbox.tar.gz -C {}".format(NOISE_DETECTION_WORKING_DIR))
+    murmur16_train = tf.keras.utils.image_dataset_from_directory(murmur16_path, label_mode="binary", shuffle=True, subset="training",
+                                                                 batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42,
+                                                                 validation_split=0.2,
+                                                                 image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]))
 
-    if ALGORITHM_HPS[LOAD_TRAINED_MODELS_lbl]:
-        try:
-            noise_model = load_pretrained_model(model_folder, "noise")
-            logger.info("Loading model: {}".format("noises"))
-            # noise_model = load_model(os.path.join(model_folder, "noise_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-            logger.info(noise_model.summary())
-            # murmur_model = load_model(os.path.join(model_folder, "murmur_model.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-            murmur_model = load_pretrained_model(model_folder, "murmur")
-            logger.info(murmur_model.summary())
-            # murmur_decision_model = load_model(os.path.join(model_folder, "murmur_decision.tf"), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-            murmur_decision_model = load_pretrained_model(model_folder, "murmur_decision")
-            logger.info(murmur_decision_model.summary())
-            # save_challenge_model(model_folder, noise_model, murmur_model, murmur_decision_model)
-            if verbose >= 1:
-                print('Load models completed.')
-        except OSError:
-            logger.error("Could not load models setting all training to True")
-            ALGORITHM_HPS[TRAIN_NOISE_DETECTION_lbl] = True
-            ALGORITHM_HPS[GENERATE_MEL_SPECTOGRAMS_TRAIN_lbl] = True
+    murmur16_val = tf.keras.utils.image_dataset_from_directory(murmur16_path, label_mode="binary", shuffle=True, subset="validation",
+                                                               batch_size=ALGORITHM_HPS[batch_size_murmur_lbl], seed=42,
+                                                               validation_split=0.2,
+                                                               image_size=(ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl], ALGORITHM_HPS[MURMUR_IMAGE_SIZE_lbl]))
 
-    # Noise model - Parameters found after runnign AutoKeras
-    if ALGORITHM_HPS[TRAIN_NOISE_DETECTION_lbl]:
-        batch_size = 4
-         
-        
-        if ALGORITHM_HPS[RUN_AUTOKERAS_NOISE_lbl]:
-            # model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-            # filepath=os.path.join(model_folder, "noise_model_ak.model"),
-            # save_weights_only=False,
-            # monitor='val_auc',
-            # loss="binary_crossentropy",
-            # mode='max',
-            # initial_value_threshold=0.8,
-            # save_best_only=True)
-            noise_detection_dataset_train = ak.image_dataset_from_directory(
-                NOISE_DETECTION_IMGS_PATH,
-                # Use 20% data as testing data.
-                validation_split=1 - ALGORITHM_HPS[TRAIN_FRAC_lbl],
-                subset="training",
-                # Set seed to ensure the same split when loading testing data.
-                seed=42,
-                image_size=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl]),
-                batch_size=batch_size,
-            )
+    ys = []
+    for x, y in murmur16_train:
+        ys.append(y)
+    ys = np.vstack([np.vstack(yl) for yl in ys])
+    sklearn_weights_murmur = class_weight.compute_class_weight("balanced", classes=[False, True], y=ys.reshape(-1).tolist())
 
-            noise_detection_dataset_test = ak.image_dataset_from_directory(
-                NOISE_DETECTION_IMGS_PATH,
-                validation_split=1 - ALGORITHM_HPS[TRAIN_FRAC_lbl],
-                subset="validation",
-                seed=42,
-                image_size=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl]),
-                batch_size=batch_size,
-            )
-            
-            input_node = ak.ImageInput()
-            output_node = ak.ImageBlock(
-                block_type="xception",
-                augment=False
-            )(input_node)
-            output_node = ak.ClassificationHead()(output_node)
+    murmur_model_new = get_murmur_model()
 
-            clf = OHHAutoModel(
-                inputs=input_node, seed=42, objective=kt.Objective("val_auc", direction="max"), outputs=output_node, overwrite=True, 
-                max_trials=MAX_TRIALS, metrics = get_all_metrics()
-            )
-            clf.fit(noise_detection_dataset_train, epochs = NOISE_EPOCHS, workers= WORKERS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], use_multiprocessing=False)
-            
-            #TODO: Test
-            logger.info("Noise Model Classification Report")
-            logger.info(pprint.pformat(clf.evaluate(noise_detection_dataset_test, return_dict=True)))
-            
-            noise_model_new = keras.models.load_model(clf.tuner.best_model_path, custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-            
- 
-        else:
-            noise_detection_dataset_train_val = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="training", validation_split=1 - ALGORITHM_HPS[TRAIN_FRAC_lbl], seed=42, image_size=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl],ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl]) )
-            dataset_size = len(noise_detection_dataset_train_val)
-            noise_detection_dataset_train = noise_detection_dataset_train_val.take(int(dataset_size * ALGORITHM_HPS[TRAIN_FRAC_lbl]))
-            noise_detection_dataset_val = noise_detection_dataset_train_val.skip(int(dataset_size * ALGORITHM_HPS[TRAIN_FRAC_lbl]))
-            noise_detection_dataset_test = tf.keras.utils.image_dataset_from_directory(NOISE_DETECTION_IMGS_PATH, subset="validation", validation_split=1 - ALGORITHM_HPS[TRAIN_FRAC_lbl], seed=42, image_size=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl]))
-            
-               
-            # noise_detection_dataset_train = noise_detection_dataset_train.batch(batch_size,drop_remainder=True)        
-            # noise_detection_dataset_val = noise_detection_dataset_val.batch(batch_size,drop_remainder=True)        
-            # noise_detection_dataset_test = noise_detection_dataset_test.batch(batch_size,drop_remainder=True)   
-            
-            noise_detection_dataset_train = noise_detection_dataset_train.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-            noise_detection_dataset_val = noise_detection_dataset_val.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-            noise_detection_dataset_test = noise_detection_dataset_test.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
-            
-            if ALGORITHM_HPS[FINAL_TRAINING_lbl]:
-                noise_detection_dataset_train = noise_detection_dataset_train.concatenate(noise_detection_dataset_val)
-                noise_detection_dataset_val = noise_detection_dataset_test
-            
-            if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
-                # noise_model_new = get_noise_model()
-                noise_model_new = get_noise_model_v2()
-                
-            else:
-                noise_model_new = tf.keras.models.Sequential()
-                noise_model_new.add(tf.keras.layers.Conv2D(32, (ALGORITHM_HPS[FILTER_SIZE_CNN_lbl], ALGORITHM_HPS[FILTER_SIZE_CNN_lbl]), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl],  ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
-                noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
-                noise_model_new.add(tf.keras.layers.Dropout(.2))
-                noise_model_new.add(tf.keras.layers.Conv2D(32, (ALGORITHM_HPS[FILTER_SIZE_CNN_lbl], ALGORITHM_HPS[FILTER_SIZE_CNN_lbl]), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(),  input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
-                noise_model_new.add(tf.keras.layers.MaxPooling2D((2, 2)))
-                noise_model_new.add(tf.keras.layers.Flatten())
-                noise_model_new.add(tf.keras.layers.Dropout(.5))
-                noise_model_new.add(tf.keras.layers.Dense(ALGORITHM_HPS[EMBS_SIZE_lbl], activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization()))
-                noise_model_new.add(tf.keras.layers.Dense(1, activation='sigmoid', kernel_initializer=generate_kernel_initialization()))
-                noise_model_new.compile(optimizer=tf.keras.optimizers.Adam.from_config({'name': 'Adam', 'learning_rate': ALGORITHM_HPS[LEARNING_RATE_NOISE_lbl],'beta_1': 0.8999999761581421, 'beta_2': 0.9990000128746033, 'epsilon': 1e-07, 'amsgrad': False}), 
-                        loss="binary_crossentropy",
-                        metrics=get_all_metrics())
-            early_stopping_noise = tf.keras.callbacks.EarlyStopping(
-                monitor="val_loss",
-                min_delta=0.0001,
-                patience=30,
-                verbose=1,
-                mode="min",
-                baseline=None,
-                restore_best_weights=True,
-            )
-            noise_model_new.fit(noise_detection_dataset_train, class_weight={0:3,1:0.2}, batch_size = batch_size, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], epochs = NOISE_EPOCHS, callbacks=[early_stopping_noise], validation_data=noise_detection_dataset_val, workers= WORKERS)
+    murmur_model_new.fit(murmur16_train, validation_data=murmur16_val,
+                         epochs=MURMUR_EPOCHS, max_queue_size=ALGORITHM_HPS[MAX_QUEUE_lbl], validation_freq=1, class_weight={0: sklearn_weights_murmur[0], 1:sklearn_weights_murmur[1]},
+                         callbacks=[tf.keras.callbacks.EarlyStopping(
+                             monitor="val_auc",
+                             min_delta=0,
+                             patience=40,
+                             verbose=0,
+                             mode="max",
+                             baseline=None,
+                             restore_best_weights=True
+                         )], workers=WORKERS)
 
-            logger.info("Noise Model Classification Report")
-            logger.info(pprint.pformat(noise_model_new.evaluate(noise_detection_dataset_test, return_dict=True)))
-    else:
-        noise_model_new = noise_model
-        
     tf.keras.models.save_model(
-            noise_model_new,
-            os.path.join(model_folder, 'noise_model.tf'),
-            overwrite=True,
-            include_optimizer=False,
-            save_format="tf",
-            signatures=None,
-            options=None,
-            save_traces=True
-        )
+        murmur_model_new,
+        os.path.join(model_folder, 'murmur16_model.tf'),
+        overwrite=True,
+        include_optimizer=True,
+        save_format="tf",
+        signatures=None,
+        options=None,
+        save_traces=True
+    )
 
-    
-    
-    # ROOT_FOLDER = "/dev/shm/noise_imgs"
-    # ROOT_IMAGES = "/content/output/"
-    
-    # HAS_NOISE_FOLDER = ROOT_FOLDER + "has_noise/"
-    # HAS_HEARTBEAT_FOLDER = ROOT_FOLDER + "has_heatbeat/"
+    ___done___  # FORCE STOP
+    # REST OF THE OLD CODE, IGNORED...
 
-    # if not os.path.exists(ROOT_FOLDER):
-    #     os.mkdir(ROOT_FOLDER)
-    # if not os.path.exists(HAS_NOISE_FOLDER):
-    #     os.mkdir(HAS_NOISE_FOLDER)
-    # else:
-    #     shutil.rmtree(HAS_NOISE_FOLDER)
-    #     os.mkdir(HAS_NOISE_FOLDER)
-    # if not os.path.exists(HAS_HEARTBEAT_FOLDER):
-    #     os.mkdir(HAS_HEARTBEAT_FOLDER)
-    # else:
-    #     shutil.rmtree(HAS_HEARTBEAT_FOLDER)
-    #     os.mkdir(HAS_HEARTBEAT_FOLDER)
-        
-    # for row_index, row in tqdm(labels_df.iterrows()):
-    #     image_path = ROOT_IMAGES + row["image"].split("/")[-1]
-    #     if row["has_noise"]:
-    #         shutil.copy2(image_path, HAS_NOISE_FOLDER)
-    #     else:
-    #         shutil.copy2(image_path, HAS_HEARTBEAT_FOLDER)
-    
-    
-        
-    # import ipdb;ipdb.set_trace()
-    # pass
-    
-    # Find data files.
-    if verbose >= 1:
-        print('Finding data files...')
 
-    # Find the patient data files.
-    patient_files = find_patient_files(data_folder)
-    num_patient_files = len(patient_files)
 
     if num_patient_files==0:
         raise Exception('No data was provided.')

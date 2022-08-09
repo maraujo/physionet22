@@ -536,7 +536,7 @@ def augment_patient(args):
 def augment_training_folder(folder_path, augmenter_rate=5):
     patient_text_files = glob.glob(folder_path.rstrip(os.path.sep) + os.path.sep + "*.txt")
     folder_paths = [folder_path] * len(patient_text_files)
-    augmenter_rates = [5] * len(patient_text_files)
+    augmenter_rates = [augmenter_rate] * len(patient_text_files)
     pool = Pool(processes=(min(WORKERS, 8)))
     for _ in tqdm(pool.imap(augment_patient, zip(patient_text_files, folder_paths, augmenter_rates )), total=len(patient_text_files)):
         pass

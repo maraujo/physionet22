@@ -208,6 +208,7 @@ RUN_AUTOKERAS_MURMUR_lbl = "RUN_AUTOKERAS_MURMUR"
 RUN_AUTOKERAS_DECISION_lbl = "RUN_AUTOKERAS_DECISION"
 FINAL_TRAINING_lbl = "FINAL_TRAINING"
 USE_COMPLEX_MODELS_lbl = "USE_COMPLEX_MODELS"
+LOAD_2016_MODEL_lbl = "LOAD_2016_MODEL"
 RUN_TEST_lbl = "RUN_TEST"
 FINAL_DECISION_THRESHOLD_lbl = "FINAL_DECISION_THRESHOLD"
 FINAL_OUTCOME_THRESHOLD_lbl = "FINAL_OUTCOME_THRESHOLD"
@@ -233,6 +234,7 @@ ALGORITHM_HPS = {
     class_weight_outcome_lbl : 5,
     FILTER_SIZE_CNN_lbl : 3,
     TRAIN_FRAC_lbl : 0.8,
+    LOAD_2016_MODEL_lbl : True,
     IMG_HEIGHT_RATIO_lbl : 1,
     STEPS_PER_EPOCH_DECISION_lbl : None,
     FINAL_DECISION_THRESHOLD_lbl : 0.5,
@@ -1196,7 +1198,8 @@ def train_challenge_model(data_folder, model_folder, verbose):
             if ALGORITHM_HPS[USE_COMPLEX_MODELS_lbl]:
                 # noise_model_new = get_noise_model()
                 noise_model_new = get_noise_model_v2()
-                
+            elif ALGORITHM_HPS[LOAD_2016_MODEL_lbl]:
+                murmur_model_new = keras.models.load_model("murmur16_model.tf", custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })    
             else:
                 noise_model_new = tf.keras.models.Sequential()
                 noise_model_new.add(tf.keras.layers.Conv2D(32, (ALGORITHM_HPS[FILTER_SIZE_CNN_lbl], ALGORITHM_HPS[FILTER_SIZE_CNN_lbl]), activation=ALGORITHM_HPS[ACTIVATION_FUNCTION_lbl](), kernel_initializer=generate_kernel_initialization(), input_shape=(ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl],  ALGORITHM_HPS[NOISE_IMAGE_SIZE_lbl], 3)))
@@ -1978,7 +1981,7 @@ def load_challenge_model(model_folder, verbose):
     noise_model = load_model(os.path.join(model_folder, 'noise_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_model = load_model(os.path.join(model_folder, 'murmur_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
     murmur_decision_model = load_model(os.path.join(model_folder, 'murmur_decision_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy })
-    # outcome_model = load_model(os.path.join(model_folder, 'outcome_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy, "ohh_compute_cost_tf": ohh_compute_cost_tf })
+    outcome_model = load_model(os.path.join(model_folder, 'outcome_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy, "ohh_compute_cost_tf": ohh_compute_cost_tf })
     # outcome_model = xgb.Booster()
     # outcome_model.load_model(os.path.join(model_folder, "outcome_model.json"))
     outcome_model = OutcomeModel(2)
@@ -2137,33 +2140,33 @@ def run_challenge_model(model, data, recordings, verbose):
     # When used to use embs
     # patient_outcome_X = np.concatenate([embs_df.values.flatten(), patient_info ])
     patient_outcome_X = np.concatenate([patient_info, np.array([present_prob]) ])
-    # outcome_proba = model['outcome_model'].predict(patient_outcome_X.reshape(1, -1).astype(float32))[0][0]
-    # outcome_probabilities = np.array([outcome_proba, 1 - outcome_proba])
+    outcome_proba = model['outcome_model'].predict(patient_outcome_X.reshape(1, -1).astype(float32))[0][0]
+    outcome_probabilities = np.array([outcome_proba, 1 - outcome_proba])
     
     # Dewen: new outcome inference code
     # AUX_IMGS_FOLDER contains all clean images, we randomly sample 8 from them.
-    images = glob.glob(AUX_IMGS_FOLDER+'/*.png')
-    if len(images) < 8:
-        # padding to 8 images with the last image.
-        while (len(images) < 8):
-            images.append(images[-1])
-    # Inference 5 times and take the average results.
-    test_transform = torchvision.transforms.Compose([
-        torchvision.transforms.Resize((128, 128)),
-        torchvision.transforms.ToTensor(),
-    ])
-    outcome_probabilities = []
-    for _ in range(5):
-        images = random.choices(images, k=8)
-        data = []
-        for image in images:
-            current_image = Image.open(image)
-            current_image = test_transform(current_image)
-            data.append(current_image)
-        data = torch.stack(data).unsqueeze(dim=0)
-        out = model['outcome_model'](data)
-        outcome_probabilities.append(torch.nn.functional.softmax(out, dim=-1).detach().numpy()[0])
-    outcome_probabilities = np.stack(outcome_probabilities).mean(axis=0)
+    # images = glob.glob(AUX_IMGS_FOLDER+'/*.png')
+    # if len(images) < 8:
+    #     # padding to 8 images with the last image.
+    #     while (len(images) < 8):
+    #         images.append(images[-1])
+    # # Inference 5 times and take the average results.
+    # test_transform = torchvision.transforms.Compose([
+    #     torchvision.transforms.Resize((128, 128)),
+    #     torchvision.transforms.ToTensor(),
+    # ])
+    # outcome_probabilities = []
+    # for _ in range(5):
+    #     images = random.choices(images, k=8)
+    #     data = []
+    #     for image in images:
+    #         current_image = Image.open(image)
+    #         current_image = test_transform(current_image)
+    #         data.append(current_image)
+    #     data = torch.stack(data).unsqueeze(dim=0)
+    #     out = model['outcome_model'](data)
+    #     outcome_probabilities.append(torch.nn.functional.softmax(out, dim=-1).detach().numpy()[0])
+    # outcome_probabilities = np.stack(outcome_probabilities).mean(axis=0)
 
     probabilities = np.concatenate([murmur_probabilities, outcome_probabilities])
     murmur_labels = murmur_probabilities > model[FINAL_DECISION_THRESHOLD_lbl]

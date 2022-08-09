@@ -307,4 +307,4 @@ images_aux_outcome
 test_outcome_folder
 train_outcome_folder
 val_outcome_folder
-
+new_data_folder

@@ -1984,9 +1984,9 @@ def load_challenge_model(model_folder, verbose):
     outcome_model = load_model(os.path.join(model_folder, 'outcome_model.h5'), custom_objects={"CustomLayer": CastToFloat32, "compute_weighted_accuracy": compute_weighted_accuracy, "ohh_compute_cost_tf": ohh_compute_cost_tf })
     # outcome_model = xgb.Booster()
     # outcome_model.load_model(os.path.join(model_folder, "outcome_model.json"))
-    outcome_model = OutcomeModel(2)
-    outcome_model.load_state_dict(torch.load(os.path.join(model_folder, 'dewen_outcome_model.pth'), map_location='cpu'))
-    outcome_model.eval()
+    # outcome_model = OutcomeModel(2)
+    # outcome_model.load_state_dict(torch.load(os.path.join(model_folder, 'dewen_outcome_model.pth'), map_location='cpu'))
+    # outcome_model.eval()
     
     models_info = pd.read_pickle(os.path.join(model_folder,"models_info.pickle"))
     models_info = models_info.to_dict()
